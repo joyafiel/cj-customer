@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+<title>CJ Studio 訂單查詢</title>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<style>
+  :root{ --brand:#8C7B6C; --brand-dark:#6f6052; --cream:#FDFBF7; --line:#ece7df; --ink:#3d3a36; --muted:#9b938a; }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body{ margin:0; font-family:-apple-system,"PingFang TC","Noto Sans TC",Roboto,sans-serif; background:var(--cream); color:var(--ink); }
+  .wrap{ max-width:560px; margin:0 auto; padding:0 14px 40px; }
+  header{ position:sticky; top:0; z-index:5; background:var(--cream); padding:16px 14px 12px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--line); }
+  .logo{ font-weight:800; letter-spacing:.5px; }
+  .logo small{ display:block; font-weight:500; font-size:11px; color:var(--muted); letter-spacing:2px; }
+  .me{ display:flex; align-items:center; gap:8px; font-size:13px; color:var(--muted); }
+  .me img{ width:30px; height:30px; border-radius:50%; object-fit:cover; }
+  .card{ background:#fff; border:1px solid var(--line); border-radius:18px; padding:16px; margin-top:14px; box-shadow:0 1px 0 rgba(0,0,0,.02); }
+  .muted{ color:var(--muted); }
+  .center{ text-align:center; }
+  .btn{ display:inline-flex; align-items:center; justify-content:center; gap:6px; border:none; border-radius:14px; padding:12px 18px; font-size:15px; font-weight:700; cursor:pointer; background:var(--brand); color:#fff; }
+  .btn.ghost{ background:#fff; color:var(--brand); border:1px solid var(--line); }
+  .btn.block{ width:100%; }
+  .input{ width:100%; padding:12px 14px; border:1px solid var(--line); border-radius:14px; font-size:15px; outline:none; background:#fff; }
+  .input:focus{ border-color:var(--brand); }
+  .spin{ width:30px; height:30px; border:3px solid var(--line); border-top-color:var(--brand); border-radius:50%; animation:s 1s linear infinite; margin:30px auto; }
+  @keyframes s{ to{ transform:rotate(360deg); } }
+  .ord-head{ display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+  .ord-id{ font-weight:800; font-size:15px; }
+  .ord-date{ font-size:12px; color:var(--muted); margin-top:2px; }
+  .badge{ font-size:12px; font-weight:800; padding:5px 10px; border-radius:10px; white-space:nowrap; }
+  .b-wait{ background:#FFF4E5; color:#C8741A; } .b-part{ background:#E9F1FF; color:#2E6BD6; } .b-done{ background:#E9F7EC; color:#2E8B45; }
+  .pay{ font-size:11px; font-weight:800; padding:3px 8px; border-radius:8px; }
+  .pay-ok{ background:#E9F7EC; color:#2E8B45; } .pay-no{ background:#FBECEC; color:#C84A4A; }
+  .item{ padding:12px 0; border-top:1px solid var(--line); }
+  .item:first-child{ border-top:none; }
+  .item-top{ display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+  .item-name{ font-size:14px; font-weight:700; line-height:1.4; }
+  .item-qty{ font-size:13px; color:var(--muted); white-space:nowrap; }
+  .steps{ display:flex; align-items:center; gap:0; margin-top:10px; }
+  .seg{ flex:1; height:5px; border-radius:3px; background:var(--line); }
+  .seg.on{ background:var(--brand); }
+  .seg.off{ background:var(--line); }
+  .step-labels{ display:flex; justify-content:space-between; margin-top:6px; }
+  .step-labels span{ font-size:10px; color:var(--muted); flex:1; text-align:center; }
+  .step-labels span.cur{ color:var(--brand); font-weight:800; }
+  .stockout{ display:inline-block; margin-top:8px; font-size:12px; font-weight:800; color:#C84A4A; background:#FBECEC; padding:4px 10px; border-radius:8px; }
+  .track{ display:inline-flex; align-items:center; gap:5px; margin-top:8px; margin-right:6px; font-size:12px; font-weight:800; color:var(--brand); background:#F4F0EA; border:1px solid var(--line); border-radius:10px; padding:6px 10px; text-decoration:none; }
+  .ord-foot{ display:flex; align-items:center; justify-content:space-between; margin-top:14px; padding-top:12px; border-top:1px solid var(--line); }
+  .total{ font-size:13px; color:var(--muted); } .total b{ color:var(--ink); font-size:16px; }
+  .due{ font-size:13px; color:#C8741A; font-weight:800; }
+  .cand{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:14px; border:1px solid var(--line); border-radius:14px; margin-top:10px; }
+  .cand b{ font-size:15px; } .cand .sub{ font-size:12px; color:var(--muted); margin-top:2px; }
+  .pill{ font-size:11px; font-weight:800; color:var(--brand); background:#F4F0EA; padding:6px 10px; border-radius:10px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">CJ STUDIO<small>訂單查詢</small></div>
+  <div class="me" id="me"></div>
+</header>
+<div class="wrap" id="app">
+  <div class="spin"></div>
+</div>
+
+<script>
+/* ========= 設定：這兩個請填你的值 ========= */
+const GAS_URL = "PASTE_YOUR_GAS_WEB_APP_URL_HERE";   // 你的 GAS Web App /exec 網址
+const LIFF_ID = "PASTE_YOUR_LIFF_ID_HERE";           // LINE LIFF ID（之後在 LINE 後台建好再填）
+/* ========================================== */
+
+const STAGES = ['待下訂','已下訂','已集運','已抵台','備貨中','已出貨'];
+const SHORT  = {'待下訂':'待訂','已下訂':'已訂','已集運':'集運','已抵台':'抵台','備貨中':'備貨','已出貨':'已出'};
+
+const app = document.getElementById('app');
+const meEl = document.getElementById('me');
+let MODE = 'line';            // 'line' | 'preview'
+let PROFILE = { userId:'', displayName:'' };
+
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function money(n){ return '$' + (Number(n)||0).toLocaleString(); }
+function loading(){ app.innerHTML = '<div class="spin"></div>'; }
+
+async function callGAS(action, payload={}){
+  const res = await fetch(GAS_URL, {
+    method:'POST',
+    headers:{ 'Content-Type':'text/plain;charset=utf-8' },
+    body: JSON.stringify({ api:true, action, ...payload })
+  });
+  const json = await res.json();
+  if(!json || json.success===false) throw new Error((json && json.error) || 'API error');
+  return json.data;
+}
+
+/* ---------- 啟動 ---------- */
+async function start(){
+  loading();
+  const liffReady = LIFF_ID && !LIFF_ID.startsWith('PASTE') && window.liff;
+  if(liffReady){
+    try{
+      await liff.init({ liffId: LIFF_ID });
+      if(!liff.isLoggedIn()){ liff.login(); return; }
+      const p = await liff.getProfile();
+      PROFILE = { userId:p.userId, displayName:p.displayName };
+      MODE = 'line';
+      renderMe(p.pictureUrl, p.displayName);
+      await doLogin();
+      return;
+    }catch(e){ /* 落到預覽模式 */ }
+  }
+  MODE = 'preview';
+  PROFILE = { userId:'', displayName:'' };
+  renderSearch();
+}
+
+function renderMe(pic, name){
+  meEl.innerHTML = (pic?'<img src="'+esc(pic)+'" alt="">':'') + '<span>'+esc(name||'')+'</span>';
+}
+
+/* ---------- 搜尋輸入（預覽測試 / 比對沒中時手動再找，皆保留登入身分） ---------- */
+function renderSearch(){
+  const title = MODE==='preview' ? '預覽模式' : '重新搜尋';
+  app.innerHTML =
+    '<div class="card center">'
+    + '<p style="font-weight:800;margin:4px 0 2px">'+title+'</p>'
+    + '<p class="muted" style="font-size:13px;margin:0 0 14px">輸入你的暱稱或名字，看看訂單有沒有正確帶出來</p>'
+    + '<input class="input" id="pv" placeholder="例如：Evan、拉拉、bob" />'
+    + '<button class="btn block" style="margin-top:12px" id="pvBtn">查詢</button>'
+    + '</div>';
+  document.getElementById('pvBtn').onclick = ()=>{
+    const v = document.getElementById('pv').value.trim();
+    if(!v) return;
+    PROFILE.displayName = v;
+    doLogin();
+  };
+  document.getElementById('pv').addEventListener('keydown', e=>{ if(e.key==='Enter') document.getElementById('pvBtn').click(); });
+}
+
+/* ---------- 登入 / 比對 ---------- */
+async function doLogin(){
+  loading();
+  try{
+    const r = await callGAS('customerLogin', { userId:PROFILE.userId, displayName:PROFILE.displayName });
+    if(r.bound){ renderOrders(r.orders); return; }
+    if(r.candidates && r.candidates.length){ renderCandidates(r.candidates); return; }
+    renderNotFound();
+  }catch(e){ renderError(e.message); }
+}
+
+function renderCandidates(cands){
+  let html = '<div class="card">'
+    + '<p style="font-weight:800;margin:2px 0 2px">請確認你是哪一位？</p>'
+    + '<p class="muted" style="font-size:13px;margin:0 0 6px">點下面對應的名字，就能看到你的訂單</p>';
+  cands.forEach((c,i)=>{
+    html += '<div class="cand">'
+      + '<div><b>'+esc(c.info)+'</b><div class="sub">'+c.orderCount+' 筆訂單</div></div>'
+      + '<button class="btn" data-i="'+i+'">這是我</button>'
+      + '</div>';
+  });
+  html += '<button class="btn ghost block" style="margin-top:14px" id="reSearch">都不是？換個名字找</button>';
+  html += '</div>';
+  app.innerHTML = html;
+  app.querySelectorAll('.cand .btn').forEach(b=>{
+    b.onclick = ()=> pickCandidate(cands[Number(b.dataset.i)]);
+  });
+  document.getElementById('reSearch').onclick = ()=>{ renderSearch(); };
+}
+
+async function pickCandidate(c){
+  loading();
+  try{
+    if(MODE==='line' && PROFILE.userId){
+      const r = await callGAS('customerBind', { userId:PROFILE.userId, displayName:PROFILE.displayName, key:c.key, info:c.info });
+      renderOrders(r.orders);
+    }else{
+      const r = await callGAS('customerOrdersByKey', { key:c.key });
+      renderOrders(r.orders);
+    }
+  }catch(e){ renderError(e.message); }
+}
+
+/* ---------- 訂單流向 ---------- */
+function trackChips(trackingNumber){
+  const tracks = String(trackingNumber||'').split(/\s*\/\s*/).map(s=>s.trim()).filter(Boolean);
+  if(!tracks.length) return '';
+  return tracks.map(t=>'<a class="track" href="https://myship.7-11.com.tw/seller/order/detail/'+encodeURIComponent(t)+'" target="_blank" rel="noreferrer">🚚 '+esc(t)+'</a>').join('');
+}
+
+function itemBlock(it){
+  const isOut = it.stage==='斷貨';
+  let steps = '';
+  if(isOut){
+    steps = '<span class="stockout">此商品已斷貨</span>';
+  }else{
+    const idx = STAGES.indexOf(it.stage);
+    let segs='', labs='';
+    STAGES.forEach((st,i)=>{
+      segs += '<div class="seg '+(i<=idx?'on':'off')+'"></div>' + (i<STAGES.length-1?'<div style="width:3px"></div>':'');
+      labs += '<span class="'+(i===idx?'cur':'')+'">'+SHORT[st]+'</span>';
+    });
+    steps = '<div class="steps">'+segs+'</div><div class="step-labels">'+labs+'</div>';
+    if(it.stage==='已出貨' && it.tracking) steps += trackChips(it.tracking);
+  }
+  return '<div class="item">'
+    + '<div class="item-top"><div class="item-name">'+esc(it.name)+(it.spec?' <span class="muted" style="font-weight:500">('+esc(it.spec)+')</span>':'')+'</div>'
+    + '<div class="item-qty">×'+(it.qty||1)+'</div></div>'
+    + steps
+    + '</div>';
+}
+
+function orderCard(o){
+  const badge = o.shippingStatus==='已出貨' ? '<span class="badge b-done">🟢 已出貨</span>'
+            : o.shippingStatus==='部分出貨' ? '<span class="badge b-part">🔵 部分出貨</span>'
+            : '<span class="badge b-wait">🟠 備貨中</span>';
+  const payOk = o.paymentStatus==='已收款';
+  const items = (o.items||[]).map(itemBlock).join('');
+  const due = (Number(o.remaining)||0) > 0 ? '<span class="due">應付尾款 '+money(o.remaining)+'</span>' : '<span class="pay '+(payOk?'pay-ok':'pay-no')+'">'+(payOk?'已結清':'未結清')+'</span>';
+  return '<div class="card">'
+    + '<div class="ord-head"><div><div class="ord-id">'+esc(o.id)+'</div><div class="ord-date">成立日 '+esc(o.createdAt||'')+'</div></div>'+badge+'</div>'
+    + '<div style="margin-top:8px">'+items+'</div>'
+    + '<div class="ord-foot"><span class="total">訂單總額 <b>'+money(o.total)+'</b></span>'+due+'</div>'
+    + '</div>';
+}
+
+function renderOrders(orders){
+  renderMe(null, PROFILE.displayName);
+  if(!orders || !orders.length){
+    app.innerHTML = '<div class="card center"><p style="font-size:40px;margin:6px 0">📦</p><p style="font-weight:800;margin:0 0 4px">目前沒有訂單</p><p class="muted" style="font-size:13px;margin:0">有新訂單後就會出現在這裡</p></div>';
+    return;
+  }
+  const open = orders.filter(o=>o.shippingStatus!=='已出貨');
+  const done = orders.filter(o=>o.shippingStatus==='已出貨');
+  let html = '';
+  html += '<p class="muted" style="font-size:13px;margin:16px 4px 2px">進行中（'+open.length+'）</p>';
+  html += open.length ? open.map(orderCard).join('') : '<div class="card center muted" style="font-size:13px">沒有進行中的訂單 🎉</div>';
+  if(done.length){
+    html += '<p class="muted" style="font-size:13px;margin:22px 4px 2px">已出貨（'+done.length+'）</p>';
+    html += done.map(orderCard).join('');
+  }
+  app.innerHTML = html;
+}
+
+function renderNotFound(){
+  app.innerHTML = '<div class="card center">'
+    + '<p style="font-size:40px;margin:6px 0">🔍</p>'
+    + '<p style="font-weight:800;margin:0 0 4px">找不到你的訂單</p>'
+    + '<p class="muted" style="font-size:13px;margin:0 0 14px">可能是暱稱跟訂單上的名字不同，換個名字試試，或直接私訊小幫手幫你綁定</p>'
+    + '<button class="btn ghost block" id="retry">換個名字找</button>'
+    + '</div>';
+  document.getElementById('retry').onclick = ()=>{ renderSearch(); };
+}
+
+function renderError(msg){
+  app.innerHTML = '<div class="card center"><p style="font-size:36px;margin:6px 0">⚠️</p><p style="font-weight:800;margin:0 0 4px">連線出了點問題</p><p class="muted" style="font-size:12px;word-break:break-all;margin:0 0 14px">'+esc(msg||'')+'</p><button class="btn ghost" onclick="start()">重新整理</button></div>';
+}
+
+start();
+</script>
+</body>
+</html>
