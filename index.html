@@ -169,14 +169,20 @@ function renderCandidates(cands){
 async function pickCandidate(c){
   loading();
   try{
-    if(MODE==='line' && PROFILE.userId){
-      const r = await callGAS('customerBind', { userId:PROFILE.userId, displayName:PROFILE.displayName, key:c.key, info:c.info });
-      renderOrders(r.orders);
-    }else{
-      const r = await callGAS('customerOrdersByKey', { key:c.key });
-      renderOrders(r.orders);
-    }
+    if(!PROFILE.userId){ renderNeedLine(); return; }
+    const r = await callGAS('customerBind', { userId:PROFILE.userId, displayName:PROFILE.displayName, key:c.key, info:c.info });
+    if(r && r.error){ renderMsg('⚠️', '無法綁定', r.error); return; }
+    renderOrders(r.orders);
   }catch(e){ renderError(e.message); }
+}
+
+function renderMsg(emoji, title, sub){
+  app.innerHTML = '<div class="card center"><p style="font-size:36px;margin:6px 0">'+emoji+'</p><p style="font-weight:800;margin:0 0 4px">'+esc(title)+'</p><p class="muted" style="font-size:13px;margin:0 0 14px">'+esc(sub||'')+'</p><button class="btn ghost" id="back">返回</button></div>';
+  document.getElementById('back').onclick = ()=>{ renderSearch(); };
+}
+
+function renderNeedLine(){
+  renderMsg('💬', '請從 LINE 開啟', '為了保護你的訂單隱私，請透過 LINE 裡的查詢連結登入後查看');
 }
 
 /* ---------- 訂單流向 ---------- */
