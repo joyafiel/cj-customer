@@ -67,6 +67,7 @@
 /* ========= 設定：這兩個請填你的值 ========= */
 const GAS_URL = "https://script.google.com/macros/s/AKfycbzVrGHrtZh44PSTDA8K58opzMUFOshKwh8b9EA72D9kRI4f-dvGvCfmxbDir2_4aXNfSQ/exec";   // 你的 GAS Web App /exec 網址
 const LIFF_ID = "2008786061-Xv68Z47v";           // LINE LIFF ID（之後在 LINE 後台建好再填）
+ const OA_ID = "@755kygtt";               // LINE 官方帳號 ID（含 @，例如 @cjstudio）— 引導客人加好友用
 /* ========================================== */
 
 const STAGES = ['待下訂','已下訂','已集運','已抵台','備貨中','已出貨'];
@@ -104,6 +105,11 @@ async function start(){
       PROFILE = { userId:p.userId, displayName:p.displayName };
       MODE = 'line';
       renderMe(p.pictureUrl, p.displayName);
+      // ✅ 加好友檢查：沒加好友的客人收不到出貨通知，先引導加好友
+      try {
+        const fr = await liff.getFriendship();
+        if (fr && fr.friendFlag === false) { renderAddFriend(); return; }
+      } catch(e) { /* 拿不到好友狀態就放行，不擋客人 */ }
       await doLogin();
       return;
     }catch(e){ /* 落到預覽模式 */ }
@@ -115,6 +121,39 @@ async function start(){
 
 function renderMe(pic, name){
   meEl.innerHTML = (pic?'<img src="'+esc(pic)+'" alt="">':'') + '<span>'+esc(name||'')+'</span>';
+}
+
+/* ---------- 加好友引導（沒加好友收不到出貨通知） ---------- */
+function addFriendUrl(){
+  const id = (OA_ID||'').trim();
+  if(!id || id.indexOf('PASTE')===0) return '';
+  return 'https://line.me/R/ti/p/' + encodeURIComponent(id);
+}
+function renderAddFriend(){
+  const url = addFriendUrl();
+  app.innerHTML =
+    '<div class="card center">'
+    + '<p style="font-size:44px;margin:8px 0 4px">💛</p>'
+    + '<p style="font-weight:800;font-size:17px;margin:0 0 8px">先加 CJ Studio 好友</p>'
+    + '<p class="muted" style="font-size:13px;line-height:1.8;margin:0 0 18px">加入官方帳號好友，<br>出貨、到貨的最新進度才能即時通知你 🚚<br><span style="color:#C8741A;font-weight:800">沒加好友就收不到通知喔</span></p>'
+    + (url ? '<button class="btn block" id="addBtn">加入好友</button>' : '')
+    + '<button class="btn ghost block" style="margin-top:10px" id="doneBtn">我加好友了，看訂單</button>'
+    + '<button class="btn block" style="margin-top:10px;background:none;color:#b9b1a8;font-weight:700" id="skipBtn">先看訂單就好</button>'
+    + '</div>';
+  if(url){
+    document.getElementById('addBtn').onclick = ()=>{
+      try{ liff.openWindow({ url:url, external:true }); }catch(e){ location.href = url; }
+    };
+  }
+  document.getElementById('doneBtn').onclick = async ()=>{
+    loading();
+    try{
+      const fr = await liff.getFriendship();
+      if(fr && fr.friendFlag){ await doLogin(); return; }
+    }catch(e){ await doLogin(); return; }
+    renderAddFriend();
+  };
+  document.getElementById('skipBtn').onclick = ()=>{ doLogin(); };
 }
 
 /* ---------- 搜尋輸入（預覽測試 / 比對沒中時手動再找，皆保留登入身分） ---------- */
