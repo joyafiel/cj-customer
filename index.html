@@ -108,8 +108,11 @@ async function start(){
       // ✅ 加好友檢查：沒加好友的客人收不到出貨通知，先引導加好友
       try {
         const fr = await liff.getFriendship();
+        alert('🔍 friendFlag = ' + (fr && fr.friendFlag));
         if (fr && fr.friendFlag === false) { renderAddFriend(); return; }
-      } catch(e) { /* 拿不到好友狀態就放行，不擋客人 */ }
+      } catch(e) {
+        alert('🔍 getFriendship 失敗：' + (e && e.message ? e.message : e));
+      }
       await doLogin();
       return;
     }catch(e){ /* 落到預覽模式 */ }
