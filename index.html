@@ -279,10 +279,19 @@ function renderOrders(orders){
   html += '<p class="muted" style="font-size:13px;margin:16px 4px 2px">進行中（'+open.length+'）</p>';
   html += open.length ? open.map(orderCard).join('') : '<div class="card center muted" style="font-size:13px">沒有進行中的訂單 🎉</div>';
   if(done.length){
-    html += '<p class="muted" style="font-size:13px;margin:22px 4px 2px">已出貨（'+done.length+'）</p>';
-    html += done.map(orderCard).join('');
+    html += '<p class="muted" style="font-size:13px;margin:22px 4px 2px">已完成（'+done.length+'）</p>';
+    html += '<button class="btn ghost block" id="showPast" style="margin-top:4px">📦 查看過往訂單（'+done.length+'）</button>';
+    html += '<div id="pastWrap"></div>';
   }
   app.innerHTML = html;
+  // 過往訂單點開才渲染，初次載入只畫進行中的，老顧客開更快
+  if(done.length){
+    var _btn = document.getElementById('showPast');
+    if(_btn) _btn.onclick = function(){
+      document.getElementById('pastWrap').innerHTML = done.map(orderCard).join('');
+      _btn.style.display = 'none';
+    };
+  }
 }
 
 function renderNotFound(){
