@@ -259,7 +259,11 @@ function orderCard(o){
             : '<span class="badge b-wait">🟠 備貨中</span>';
   const payOk = o.paymentStatus==='已收款';
   const items = (o.items||[]).map(itemBlock).join('');
-  const due = (Number(o.remaining)||0) > 0 ? '<span class="due">應付尾款 '+money(o.remaining)+'</span>' : '<span class="pay '+(payOk?'pay-ok':'pay-no')+'">'+(payOk?'已結清':'未結清')+'</span>';
+  const unpaidDep = Math.max(0, (Number(o.depositDue)||0) - (Number(o.deposit)||0));
+  const rem = Number(o.remaining)||0;
+  const due = unpaidDep > 0 ? '<span class="due">待付訂金 '+money(unpaidDep)+'</span>'
+            : rem > 0 ? '<span class="due">待付尾款 '+money(rem)+'</span>'
+            : '<span class="pay '+(payOk?'pay-ok':'pay-no')+'">'+(payOk?'已結清':'未結清')+'</span>';
   return '<div class="card">'
     + '<div class="ord-head"><div><div class="ord-id">'+esc(o.id)+'</div><div class="ord-date">成立日 '+esc(o.createdAt||'')+'</div></div>'+badge+'</div>'
     + '<div style="margin-top:8px">'+items+'</div>'
