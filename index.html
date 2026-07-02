@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
-<title>CJ Studio 訂單查詢</title>
+<title>訂單查詢</title>
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <style>
   :root{ --brand:#8C7B6C; --brand-dark:#6f6052; --cream:#FDFBF7; --line:#ece7df; --ink:#3d3a36; --muted:#9b938a; }
@@ -56,7 +56,7 @@
 </head>
 <body>
 <header>
-  <div class="logo">CJ STUDIO<small>訂單查詢</small></div>
+  <div class="logo" id="headerLogo">訂單查詢<small>ORDER STATUS</small></div>
   <div class="me" id="me"></div>
 </header>
 <div class="wrap" id="app">
@@ -64,18 +64,28 @@
 </div>
 
 <script>
-/* ========= 設定：這兩個請填你的值 ========= */
-const GAS_URL = "https://script.google.com/macros/s/AKfycbzVrGHrtZh44PSTDA8K58opzMUFOshKwh8b9EA72D9kRI4f-dvGvCfmxbDir2_4aXNfSQ/exec";   // 你的 GAS Web App /exec 網址
-const LIFF_ID = "2008786061-Xv68Z47v";           // LINE LIFF ID（之後在 LINE 後台建好再填）
- const OA_ID = "@755kygtt";               // LINE 官方帳號 ID（含 @，例如 @cjstudio）— 引導客人加好友用
-/* ========================================== */
+/* ========= 設定 ========= */
+const GAS_URL = "https://script.google.com/macros/s/AKfycbzVrGHrtZh44PSTDA8K58opzMUFOshKwh8b9EA72D9kRI4f-dvGvCfmxbDir2_4aXNfSQ/exec";
+const LIFF_ID = "2008786061-Xv68Z47v";
+const OA_ID = "@755kygtt";
+
+// ✅ Partner Mode：URL 帶 ?mode=partner 時隱藏品牌資訊
+const IS_PARTNER = new URLSearchParams(window.location.search).get('mode') === 'partner';
+
+// ✅ 非 Partner mode 才顯示 CJ Studio 品牌
+if (!IS_PARTNER) {
+  document.title = 'CJ Studio 訂單查詢';
+  document.getElementById('headerLogo').innerHTML = 'CJ STUDIO<small>訂單查詢</small>';
+}
+
+/* ==========================================  */
 
 const STAGES = ['待下訂','已下訂','已集運','已抵台','備貨中','已出貨'];
 const SHORT  = {'待下訂':'待訂','已下訂':'已訂','已集運':'集運','已抵台':'抵台','備貨中':'備貨','已出貨':'已出'};
 
 const app = document.getElementById('app');
 const meEl = document.getElementById('me');
-let MODE = 'line';            // 'line' | 'preview'
+let MODE = 'line';
 let PROFILE = { userId:'', displayName:'' };
 
 function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
@@ -93,7 +103,6 @@ async function callGAS(action, payload={}){
   return json.data;
 }
 
-/* ---------- 啟動 ---------- */
 async function start(){
   loading();
   const liffReady = LIFF_ID && !LIFF_ID.startsWith('PASTE') && window.liff;
@@ -105,14 +114,16 @@ async function start(){
       PROFILE = { userId:p.userId, displayName:p.displayName };
       MODE = 'line';
       renderMe(p.pictureUrl, p.displayName);
-      // ✅ 加好友檢查：沒加好友的客人收不到出貨通知，先引導加好友
-      try {
-        const fr = await liff.getFriendship();
-        if (fr && fr.friendFlag === false) { renderAddFriend(); return; }
-      } catch(e) { /* 拿不到好友狀態就放行，不擋客人 */ }
+      // 加好友檢查：Partner mode 跳過（不引導加 OA）
+      if (!IS_PARTNER) {
+        try {
+          const fr = await liff.getFriendship();
+          if (fr && fr.friendFlag === false) { renderAddFriend(); return; }
+        } catch(e) {}
+      }
       await doLogin();
       return;
-    }catch(e){ /* 落到預覽模式 */ }
+    }catch(e){}
   }
   MODE = 'preview';
   PROFILE = { userId:'', displayName:'' };
@@ -123,46 +134,41 @@ function renderMe(pic, name){
   meEl.innerHTML = (pic?'<img src="'+esc(pic)+'" alt="">':'') + '<span>'+esc(name||'')+'</span>';
 }
 
-/* ---------- 加好友引導（沒加好友收不到出貨通知） ---------- */
+/* 加好友引導（Partner mode 不顯示） */
 function addFriendUrl(){
+  if (IS_PARTNER) return '';
   const id = (OA_ID||'').trim();
   if(!id || id.indexOf('PASTE')===0) return '';
   return 'https://line.me/R/ti/p/' + encodeURIComponent(id);
 }
+
 function renderAddFriend(){
+  if (IS_PARTNER) { doLogin(); return; } // Partner mode 跳過加好友
   const url = addFriendUrl();
   app.innerHTML =
     '<div class="card center">'
     + '<p style="font-size:44px;margin:8px 0 4px">💛</p>'
-    + '<p style="font-weight:800;font-size:17px;margin:0 0 8px">先加 CJ Studio 好友</p>'
-    + '<p class="muted" style="font-size:13px;line-height:1.8;margin:0 0 18px">加入官方帳號好友，<br>出貨、到貨的最新進度才能即時通知你 🚚<br><span style="color:#C8741A;font-weight:800">沒加好友就收不到通知喔</span></p>'
+    + '<p style="font-weight:800;font-size:17px;margin:0 0 8px">先加好友</p>'
+    + '<p class="muted" style="font-size:13px;line-height:1.8;margin:0 0 18px">加入官方帳號好友，<br>出貨、到貨的最新進度才能即時通知你 🚚</p>'
     + (url ? '<button class="btn block" id="addBtn">加入好友</button>' : '')
     + '<button class="btn ghost block" style="margin-top:10px" id="doneBtn">我加好友了，看訂單</button>'
     + '<button class="btn block" style="margin-top:10px;background:none;color:#b9b1a8;font-weight:700" id="skipBtn">先看訂單就好</button>'
     + '</div>';
-  if(url){
-    document.getElementById('addBtn').onclick = ()=>{
-      try{ liff.openWindow({ url:url, external:true }); }catch(e){ location.href = url; }
-    };
-  }
+  if(url){ document.getElementById('addBtn').onclick = ()=>{ try{ liff.openWindow({ url:url, external:true }); }catch(e){ location.href = url; } }; }
   document.getElementById('doneBtn').onclick = async ()=>{
     loading();
-    try{
-      const fr = await liff.getFriendship();
-      if(fr && fr.friendFlag){ await doLogin(); return; }
-    }catch(e){ await doLogin(); return; }
+    try{ const fr = await liff.getFriendship(); if(fr && fr.friendFlag){ await doLogin(); return; } }catch(e){ await doLogin(); return; }
     renderAddFriend();
   };
   document.getElementById('skipBtn').onclick = ()=>{ doLogin(); };
 }
 
-/* ---------- 搜尋輸入（預覽測試 / 比對沒中時手動再找，皆保留登入身分） ---------- */
 function renderSearch(){
   const title = MODE==='preview' ? '預覽模式' : '重新搜尋';
   app.innerHTML =
     '<div class="card center">'
     + '<p style="font-weight:800;margin:4px 0 2px">'+title+'</p>'
-    + '<p class="muted" style="font-size:13px;margin:0 0 14px">輸入你的暱稱或名字，看看訂單有沒有正確帶出來</p>'
+    + '<p class="muted" style="font-size:13px;margin:0 0 14px">輸入你的暱稱或名字，查詢訂單狀態</p>'
     + '<input class="input" id="pv" placeholder="例如：Evan、拉拉、bob" />'
     + '<button class="btn block" style="margin-top:12px" id="pvBtn">查詢</button>'
     + '</div>';
@@ -175,7 +181,6 @@ function renderSearch(){
   document.getElementById('pv').addEventListener('keydown', e=>{ if(e.key==='Enter') document.getElementById('pvBtn').click(); });
 }
 
-/* ---------- 登入 / 比對 ---------- */
 async function doLogin(){
   loading();
   try{
@@ -199,9 +204,7 @@ function renderCandidates(cands){
   html += '<button class="btn ghost block" style="margin-top:14px" id="reSearch">都不是？換個名字找</button>';
   html += '</div>';
   app.innerHTML = html;
-  app.querySelectorAll('.cand .btn').forEach(b=>{
-    b.onclick = ()=> pickCandidate(cands[Number(b.dataset.i)]);
-  });
+  app.querySelectorAll('.cand .btn').forEach(b=>{ b.onclick = ()=> pickCandidate(cands[Number(b.dataset.i)]); });
   document.getElementById('reSearch').onclick = ()=>{ renderSearch(); };
 }
 
@@ -221,10 +224,9 @@ function renderMsg(emoji, title, sub){
 }
 
 function renderNeedLine(){
-  renderMsg('💬', '請從 LINE 開啟', '為了保護你的訂單隱私，請透過 LINE 裡的查詢連結登入後查看');
+  renderMsg('💬', '請從 LINE 開啟', '請透過 LINE 裡的查詢連結登入後查看');
 }
 
-/* ---------- 訂單流向 ---------- */
 function trackChips(trackingNumber){
   const tracks = String(trackingNumber||'').split(/\s*\/\s*/).map(s=>s.trim()).filter(Boolean);
   if(!tracks.length) return '';
@@ -288,7 +290,6 @@ function renderOrders(orders){
     html += '<div id="pastWrap"></div>';
   }
   app.innerHTML = html;
-  // 過往訂單點開才渲染，初次載入只畫進行中的，老顧客開更快
   if(done.length){
     var _btn = document.getElementById('showPast');
     if(_btn) _btn.onclick = function(){
@@ -302,7 +303,7 @@ function renderNotFound(){
   app.innerHTML = '<div class="card center">'
     + '<p style="font-size:40px;margin:6px 0">🔍</p>'
     + '<p style="font-weight:800;margin:0 0 4px">找不到你的訂單</p>'
-    + '<p class="muted" style="font-size:13px;margin:0 0 14px">可能是暱稱跟訂單上的名字不同，換個名字試試，或直接私訊小幫手幫你綁定</p>'
+    + '<p class="muted" style="font-size:13px;margin:0 0 14px">可能是暱稱跟訂單上的名字不同，換個名字試試</p>'
     + '<button class="btn ghost block" id="retry">換個名字找</button>'
     + '</div>';
   document.getElementById('retry').onclick = ()=>{ renderSearch(); };
