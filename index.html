@@ -35,6 +35,7 @@
   .item{ padding:12px 0; border-top:1px solid var(--line); }
   .item:first-child{ border-top:none; }
   .item-top{ display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+  .item-thumb{ width:44px; height:44px; border-radius:10px; object-fit:cover; border:1px solid var(--line); flex-shrink:0; background:#f4f0ea; }
   .item-name{ font-size:14px; font-weight:700; line-height:1.4; }
   .item-qty{ font-size:13px; color:var(--muted); white-space:nowrap; }
   .steps{ display:flex; align-items:center; gap:0; margin-top:10px; }
@@ -248,8 +249,12 @@ function itemBlock(it){
     steps = '<div class="steps">'+segs+'</div><div class="step-labels">'+labs+'</div>';
     if(it.stage==='已出貨' && it.tracking) steps += trackChips(it.tracking);
   }
+  // ✅ 有商品圖才顯示縮圖（沒圖的舊商品不影響版面），用 ImageKit ?tr=w-100 拿小圖，不吃原圖流量
+  const thumb = it.imageUrl ? '<img class="item-thumb" src="'+esc(it.imageUrl)+(it.imageUrl.indexOf('?')!==-1?'&':'?')+'tr=w-100" alt="" loading="lazy">' : '';
   return '<div class="item">'
-    + '<div class="item-top"><div class="item-name">'+esc(it.name)+(it.spec?' <span class="muted" style="font-weight:500">('+esc(it.spec)+')</span>':'')+'</div>'
+    + '<div class="item-top">'
+    + thumb
+    + '<div style="flex:1;min-width:0"><div class="item-name">'+esc(it.name)+(it.spec?' <span class="muted" style="font-weight:500">('+esc(it.spec)+')</span>':'')+'</div></div>'
     + '<div class="item-qty">×'+(it.qty||1)+'</div></div>'
     + steps
     + '</div>';
