@@ -259,7 +259,7 @@ function trackChips(trackingNumber){
   const tracks = String(trackingNumber||'').split(/\s*\/\s*/).map(s=>s.trim()).filter(Boolean);
   if(!tracks.length) return '';
   // ✅ 客人端一律用 buyer 網址；/seller/ 是賣家後台，客人點進去只會看到登入頁
-  return tracks.map(t=>'<a class="track" href="https://myship.7-11.com.tw/buyer/order/detail/'+encodeURIComponent(t)+'" target="_blank" rel="noreferrer">🚚 查詢包裹 '+esc(t)+'</a>').join('');
+  return tracks.map(t=>'<a class="track" href="https://myship.7-11.com.tw/buyer/order/detail/'+encodeURIComponent(t)+'?openExternalBrowser=1" target="_blank" rel="noreferrer">🚚 查詢包裹 '+esc(t)+'</a>').join('');
 }
 
 function itemBlock(it){
