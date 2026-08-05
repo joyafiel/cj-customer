@@ -57,6 +57,17 @@
   .money-row .lbl{ color:var(--muted); font-weight:600; }
   .money-row .paid{ color:#2E8B45; }
   .money-row .unpaid{ color:#C8741A; }
+  /* ✅ 包裹分組 */
+  .pkg{ border:1px solid var(--line); border-radius:14px; padding:12px 14px; margin-top:10px; background:#fff; }
+  .pkg-head{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .pkg-name{ font-weight:800; font-size:14px; }
+  .pkg-date{ font-size:12px; color:var(--muted); font-weight:600; }
+  .pkg-list{ margin-top:8px; font-size:13px; color:#444; line-height:1.7; }
+  .pkg-list .oid{ color:var(--muted); font-size:11px; font-weight:700; }
+  .tag-pkg{ display:inline-block; font-size:11px; font-weight:800; padding:2px 8px; border-radius:999px;
+            background:#EAF4EC; color:#2E8B45; margin-top:6px; }
+  .tag-wait{ background:#FBF0E2; color:#C8741A; }
+  .merge-note{ font-size:11px; color:var(--muted); font-weight:600; margin-top:3px; }
   .cand{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:14px; border:1px solid var(--line); border-radius:14px; margin-top:10px; }
   .cand b{ font-size:15px; } .cand .sub{ font-size:12px; color:var(--muted); margin-top:2px; }
   .pill{ font-size:11px; font-weight:800; color:var(--brand); background:#F4F0EA; padding:6px 10px; border-radius:10px; }
@@ -263,7 +274,12 @@ function itemBlock(it){
       labs += '<span class="'+(i===idx?'cur':'')+'">'+SHORT[st]+'</span>';
     });
     steps = '<div class="steps">'+segs+'</div><div class="step-labels">'+labs+'</div>';
-    if(it.stage==='已出貨' && it.tracking) steps += trackChips(it.tracking);
+    // ✅ 改掛「包裹 N・日期」標籤，客人一眼看出同一張單為什麼分好幾次到
+    if(it.stage==='已出貨'){
+      const p = PKG_BY_TRACK[String(it.tracking||'').trim()];
+      if(p) steps += '<div><span class="tag-pkg">包裹 '+p.no+(p.date?'・'+esc(shortDate(p.date)):'')+'</span></div>';
+      else if(it.tracking) steps += trackChips(it.tracking);
+    }
   }
   // ✅ 有商品圖才顯示縮圖（沒圖的舊商品不影響版面），用 ImageKit ?tr=w-100 拿小圖，不吃原圖流量
   const thumb = it.imageUrl ? '<img class="item-thumb" src="'+esc(it.imageUrl)+(it.imageUrl.indexOf('?')!==-1?'&':'?')+'tr=w-200" alt="" loading="lazy" onclick="openLightbox(\''+esc(it.imageUrl).replace(/'/g,"\\'")+'\')">' : '';
@@ -274,6 +290,70 @@ function itemBlock(it){
     + '<div class="item-qty">×'+(it.qty||1)+'</div></div>'
     + steps
     + '</div>';
+}
+
+// ✅ 依「物流單號」把所有已出貨商品分組 —— 同一個單號＝同一個包裹，
+//    包裹可能橫跨多張訂單（併單只是合併收款，出貨本來就各走各的）
+var PKG_BY_TRACK = {};   // tracking -> { no, date }
+function buildPackages(orders){
+  PKG_BY_TRACK = {};
+  const map = {};
+  (orders||[]).forEach(o=>{
+    (o.items||[]).forEach(it=>{
+      if(it.stage!=='已出貨') return;
+      const tk = String(it.tracking||'').trim();
+      if(!tk) return;
+      if(!map[tk]) map[tk] = { tracking: tk, date: '', items: [] };
+      map[tk].items.push({ orderId:o.id, name:it.name, spec:it.spec, qty:it.qty });
+      const d = String(it.shipDate||'').trim();
+      if(d && (!map[tk].date || d < map[tk].date)) map[tk].date = d;
+    });
+  });
+  // 依出貨日排序後編號；沒有日期的排最後
+  const list = Object.keys(map).map(k=>map[k]).sort((a,b)=>{
+    if(a.date && b.date) return a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
+    if(a.date) return -1;
+    if(b.date) return 1;
+    return 0;
+  });
+  list.forEach((p,i)=>{ p.no = i+1; PKG_BY_TRACK[p.tracking] = { no:p.no, date:p.date }; });
+  return list;
+}
+function shortDate(d){
+  const m = String(d||'').match(/(\d{1,2})\/(\d{1,2})$/);
+  return m ? (m[1]+'/'+m[2]) : String(d||'');
+}
+function packagesBlock(list){
+  if(!list.length) return '';
+  return '<p class="muted" style="font-size:13px;margin:16px 4px 2px">出貨進度（'+list.length+' 個包裹）</p>'
+    + list.map(p=>{
+        const rows = p.items.map(x=>
+          '<div>'+esc(x.name)+(x.spec?' <span class="muted">('+esc(x.spec)+')</span>':'')+' ×'+(x.qty||1)
+          +' <span class="oid">'+esc(x.orderId)+'</span></div>').join('');
+        return '<div class="pkg">'
+          + '<div class="pkg-head"><span class="pkg-name">📦 包裹 '+p.no+'</span>'
+          + (p.date?'<span class="pkg-date">'+esc(shortDate(p.date))+' 寄出</span>':'')
+          + trackChips(p.tracking) + '</div>'
+          + '<div class="pkg-list">'+rows+'</div></div>';
+      }).join('');
+}
+
+// ✅ 併單群組：同一個賣場連結＝尾款只收一次（跟出貨無關）
+var MERGE_GROUPS = {};   // storeLink -> { ids:[], anchorId }
+function buildMergeGroups(orders){
+  MERGE_GROUPS = {};
+  const g = {};
+  (orders||[]).forEach(o=>{
+    const k = String(o.storeLink||'').trim();
+    if(!k) return;
+    (g[k]=g[k]||[]).push(o);
+  });
+  Object.keys(g).forEach(k=>{
+    if(g[k].length < 2) return;
+    let anchor = null;
+    g[k].forEach(o=>{ if((Number(o.remaining)||0) > 0 && !anchor) anchor = o; });
+    MERGE_GROUPS[k] = { ids: g[k].map(o=>o.id), anchorId: anchor ? anchor.id : '' };
+  });
 }
 
 function orderCard(o){
@@ -295,9 +375,19 @@ function orderCard(o){
       : '<div class="money-row"><span class="lbl">訂金</span><span class="paid">✓ 已付清</span></div>');
   }
   // 尾款那行
-  rows.push(rem > 0
-    ? '<div class="money-row"><span class="lbl">尾款</span><span class="unpaid">待付 '+money(rem)+'</span></div>'
-    : '<div class="money-row"><span class="lbl">尾款</span><span class="paid">✓ 已結清'+(fullyShipped?'（貨到付款）':'')+'</span></div>');
+  // ✅ 併單：尾款整筆掛在主單，其他單顯示「併入 ORDxxx 收取」而不是「已結清」
+  //    寫已結清會讓客人以為自己付過了，事實上是由另一張單一起收
+  const grp = MERGE_GROUPS[String(o.storeLink||'').trim()];
+  if (rem > 0) {
+    rows.push('<div class="money-row"><span class="lbl">尾款</span><span class="unpaid">待付 '+money(rem)+'</span></div>');
+    if (grp && grp.anchorId === o.id) {
+      rows.push('<div class="merge-note">取貨時付款・已含此次 '+grp.ids.length+' 張訂單</div>');
+    }
+  } else if (!fullyShipped && grp && grp.anchorId && grp.anchorId !== o.id) {
+    rows.push('<div class="money-row"><span class="lbl">尾款</span><span class="muted">併入 '+esc(grp.anchorId)+' 收取</span></div>');
+  } else {
+    rows.push('<div class="money-row"><span class="lbl">尾款</span><span class="paid">✓ 已結清'+(fullyShipped?'（貨到付款）':'')+'</span></div>');
+  }
   const due = '<div class="money-rows">' + rows.join('') + '</div>';
   return '<div class="card">'
     + '<div class="ord-head"><div><div class="ord-id">'+esc(o.id)+'</div><div class="ord-date">成立日 '+esc(o.createdAt||'')+'</div></div>'+badge+'</div>'
@@ -312,10 +402,13 @@ function renderOrders(orders){
     app.innerHTML = '<div class="card center"><p style="font-size:40px;margin:6px 0">📦</p><p style="font-weight:800;margin:0 0 4px">目前沒有訂單</p><p class="muted" style="font-size:13px;margin:0">有新訂單後就會出現在這裡</p></div>';
     return;
   }
+  const pkgs = buildPackages(orders);   // ✅ 要先建索引，itemBlock 和 orderCard 都會用到
+  buildMergeGroups(orders);
   const open = orders.filter(o=>o.shippingStatus!=='已出貨');
   const done = orders.filter(o=>o.shippingStatus==='已出貨');
   let html = '';
-  html += '<p class="muted" style="font-size:13px;margin:16px 4px 2px">進行中（'+open.length+'）</p>';
+  html += packagesBlock(pkgs);
+  html += '<p class="muted" style="font-size:13px;margin:16px 4px 2px">訂單與付款・進行中（'+open.length+'）</p>';
   html += open.length ? open.map(orderCard).join('') : '<div class="card center muted" style="font-size:13px">沒有進行中的訂單 🎉</div>';
   if(done.length){
     html += '<p class="muted" style="font-size:13px;margin:22px 4px 2px">已完成（'+done.length+'）</p>';
