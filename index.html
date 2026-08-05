@@ -309,12 +309,14 @@ function buildPackages(orders){
       if(d && (!map[tk].date || d < map[tk].date)) map[tk].date = d;
     });
   });
-  // 依出貨日排序後編號；沒有日期的排最後
+  // 依出貨日由舊到新排序後編號。沒有日期的是「出貨日期」欄啟用前的歷史資料，
+  // 一律當成最早的，排在最前面拿小編號 —— 這樣編號才會穩定，
+  // 客人之後再回來看，「包裹 3」永遠是同一個包裹，不會因為又寄了新的就跳號
   const list = Object.keys(map).map(k=>map[k]).sort((a,b)=>{
-    if(a.date && b.date) return a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
-    if(a.date) return -1;
-    if(b.date) return 1;
-    return 0;
+    if(!a.date && !b.date) return 0;
+    if(!a.date) return -1;
+    if(!b.date) return 1;
+    return a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
   });
   list.forEach((p,i)=>{ p.no = i+1; PKG_BY_TRACK[p.tracking] = { no:p.no, date:p.date }; });
   return list;
@@ -323,20 +325,36 @@ function shortDate(d){
   const m = String(d||'').match(/(\d{1,2})\/(\d{1,2})$/);
   return m ? (m[1]+'/'+m[2]) : String(d||'');
 }
+// 預設展開幾個包裹（最新的在上面）；老客人累積幾十個包裹時不會把整頁佔滿
+var PKG_SHOW = 3;
+function pkgCard(p){
+  const rows = p.items.map(x=>
+    '<div>'+esc(x.name)+(x.spec?' <span class="muted">('+esc(x.spec)+')</span>':'')+' ×'+(x.qty||1)
+    +' <span class="oid">'+esc(x.orderId)+'</span></div>').join('');
+  return '<div class="pkg">'
+    + '<div class="pkg-head"><span class="pkg-name">📦 包裹 '+p.no+'</span>'
+    + (p.date?'<span class="pkg-date">'+esc(shortDate(p.date))+' 寄出</span>':'')
+    + trackChips(p.tracking) + '</div>'
+    + '<div class="pkg-list">'+rows+'</div></div>';
+}
 function packagesBlock(list){
   if(!list.length) return '';
-  return '<p class="muted" style="font-size:13px;margin:16px 4px 2px">出貨進度（'+list.length+' 個包裹）</p>'
-    + list.map(p=>{
-        const rows = p.items.map(x=>
-          '<div>'+esc(x.name)+(x.spec?' <span class="muted">('+esc(x.spec)+')</span>':'')+' ×'+(x.qty||1)
-          +' <span class="oid">'+esc(x.orderId)+'</span></div>').join('');
-        return '<div class="pkg">'
-          + '<div class="pkg-head"><span class="pkg-name">📦 包裹 '+p.no+'</span>'
-          + (p.date?'<span class="pkg-date">'+esc(shortDate(p.date))+' 寄出</span>':'')
-          + trackChips(p.tracking) + '</div>'
-          + '<div class="pkg-list">'+rows+'</div></div>';
-      }).join('');
+  const newestFirst = list.slice().reverse();
+  const recent = newestFirst.slice(0, PKG_SHOW);
+  const older  = newestFirst.slice(PKG_SHOW);
+  let h = '<p class="muted" style="font-size:13px;margin:16px 4px 2px">出貨進度（共 '+list.length+' 個包裹'
+        + (older.length ? '，顯示最近 '+recent.length+' 個' : '') + '）</p>';
+  h += recent.map(pkgCard).join('');
+  if(older.length){
+    h += '<button class="btn ghost block" id="showOldPkg" style="margin-top:8px">📦 查看更早的包裹（'+older.length+'）</button>';
+    h += '<div id="oldPkgWrap"></div>';
+    PKG_OLDER_HTML = older.map(pkgCard).join('');
+  } else {
+    PKG_OLDER_HTML = '';
+  }
+  return h;
 }
+var PKG_OLDER_HTML = '';
 
 // ✅ 併單群組：同一個賣場連結＝尾款只收一次（跟出貨無關）
 var MERGE_GROUPS = {};   // storeLink -> { ids:[], anchorId }
@@ -416,6 +434,11 @@ function renderOrders(orders){
     html += '<div id="pastWrap"></div>';
   }
   app.innerHTML = html;
+  var _pkgBtn = document.getElementById('showOldPkg');
+  if(_pkgBtn) _pkgBtn.onclick = function(){
+    document.getElementById('oldPkgWrap').innerHTML = PKG_OLDER_HTML;
+    _pkgBtn.style.display = 'none';
+  };
   if(done.length){
     var _btn = document.getElementById('showPast');
     if(_btn) _btn.onclick = function(){
