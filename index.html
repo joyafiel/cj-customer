@@ -301,7 +301,7 @@ function itemBlock(it){
     steps = '<div class="steps">'+segs+'</div><div class="step-labels">'+labs+'</div>';
     // ✅ 改掛「包裹 N・日期」標籤，客人一眼看出同一張單為什麼分好幾次到
     if(it.stage==='已出貨'){
-      const p = PKG_BY_TRACK[String(it.tracking||'').trim()];
+      const p = PKG_BY_TRACK[String(it.tracking||'').trim() || String(o.trackingNumber||'').trim()];
       if(p) steps += '<div><span class="tag-pkg">包裹 '+p.no+(p.date?'・'+esc(shortDate(p.date)):'')+'</span></div>';
       else if(it.tracking) steps += trackChips(it.tracking);
     }
@@ -326,7 +326,10 @@ function buildPackages(orders){
   (orders||[]).forEach(o=>{
     (o.items||[]).forEach(it=>{
       if(it.stage!=='已出貨') return;
-      const tk = String(it.tracking||'').trim();
+      // ✅ 商品沒有自己的物流單號時退回用訂單層級的：
+      //    7-11 回填書籤和手動貼上的單號都只寫到訂單層級，不會寫進每一件商品，
+      //    只看商品層級的話整張單寄出的訂單會完全抓不到包裹
+      const tk = String(it.tracking||'').trim() || String(o.trackingNumber||'').trim();
       if(!tk) return;
       if(!map[tk]) map[tk] = { tracking: tk, date: '', items: [] };
       map[tk].items.push({ orderId:o.id, name:it.name, spec:it.spec, qty:it.qty });
