@@ -135,18 +135,6 @@ async function start(){
   loading();
   const liffReady = LIFF_ID && !LIFF_ID.startsWith('PASTE') && window.liff;
   if(liffReady){
-    // ✅ 原本是四次序列往返（init → getProfile → getFriendship → callGAS），時間相加。
-    //    改法一：記住上次的 userId，重訪時「還在初始化 LIFF」就同時發出訂單查詢
-    //    改法二：好友檢查不再擋在訂單查詢前面，兩件事並行，總時間取最大值而非總和
-    let cachedId = '', cachedName = '';
-    try{
-      cachedId = localStorage.getItem('cjUserId') || '';
-      cachedName = localStorage.getItem('cjUserName') || '';
-    }catch(e){}
-    const earlyOrders = cachedId
-      ? callGAS('customerLogin', { userId: cachedId, displayName: cachedName }).catch(()=>null)
-      : null;
-
     try{
       await liff.init({ liffId: LIFF_ID });
       if(!liff.isLoggedIn()){ liff.login(); return; }
@@ -154,28 +142,21 @@ async function start(){
       PROFILE = { userId:p.userId, displayName:p.displayName };
       MODE = 'line';
       renderMe(p.pictureUrl, p.displayName);
-      try{
-        localStorage.setItem('cjUserId', p.userId);
-        localStorage.setItem('cjUserName', p.displayName || '');
-      }catch(e){}
-
-      // 加好友檢查：Partner mode 跳過（不引導加 OA）。不 await，讓它跟訂單查詢一起跑
-      const friendCheck = IS_PARTNER ? Promise.resolve(null) : liff.getFriendship().catch(()=>null);
-
-      // 預先發出的查詢如果身分一致就直接用，省掉一整趟 GAS 往返
-      const r = (earlyOrders && cachedId === p.userId) ? await earlyOrders : null;
-
-      const fr = await friendCheck;
-      if (fr && fr.friendFlag === false) { renderAddFriend(); return; }
-
-      if (r) {
-        if(r.bound){ renderOrders(r.orders); return; }
-        if(r.candidates && r.candidates.length){ renderCandidates(r.candidates); return; }
-        renderNotFound(); return;
+      // 加好友檢查：Partner mode 跳過（不引導加 OA）
+      if (!IS_PARTNER) {
+        try {
+          const fr = await liff.getFriendship();
+          if (fr && fr.friendFlag === false) { renderAddFriend(); return; }
+        } catch(e) {}
       }
       await doLogin();
       return;
-    }catch(e){}
+    }catch(e){
+      // ⚠️ 已經拿到 LINE 身分卻出錯 → 一定要把錯誤顯示出來。
+      //    原本會靜默掉到下面的「請從 LINE 開啟」，客人看到的訊息完全誤導，
+      //    而且真正的錯誤被藏起來，根本無從查起。
+      if (PROFILE && PROFILE.userId) { renderError((e && e.message) || String(e)); return; }
+    }
   }
   MODE = 'preview';
   PROFILE = { userId:'', displayName:'' };
