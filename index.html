@@ -120,14 +120,42 @@ function openLightbox(url){
   document.body.appendChild(box);
 }
 
-async function callGAS(action, payload={}){
-  const res = await fetch(GAS_URL, {
-    method:'POST',
-    headers:{ 'Content-Type':'text/plain;charset=utf-8' },
-    body: JSON.stringify({ api:true, action, ...payload })
-  });
-  const json = await res.json();
-  if(!json || json.success===false) throw new Error((json && json.error) || 'API error');
+// ✅ 階段追蹤：錯誤訊息會帶上壞在哪一步，不用再靠猜
+let STAGE = 'start';
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// ✅ GAS 的 POST 會被轉址到 script.googleusercontent.com 取回內容，那一段偶發會回 404。
+//    原本直接 res.json()，遇到 404 拿到的是 HTML，只會丟出看不懂的解析錯誤。
+//    改成：先讀純文字 → 失敗自動重試 2 次 → 真的不行才回報「看得懂的原因」。
+async function callGAS(action, payload={}, _retry=0){
+  STAGE = 'api:' + action + (_retry ? '(重試' + _retry + ')' : '');
+  const again = async (why) => {
+    if(_retry < 2){ await sleep(700 * (_retry + 1)); return callGAS(action, payload, _retry + 1); }
+    throw new Error(why);
+  };
+
+  let res;
+  try{
+    res = await fetch(GAS_URL, {
+      method:'POST',
+      headers:{ 'Content-Type':'text/plain;charset=utf-8' },
+      body: JSON.stringify({ api:true, action, ...payload })
+    });
+  }catch(e){
+    return again('連線失敗，請確認網路後重試（' + ((e && e.message) || e) + '）');
+  }
+
+  let text = '';
+  try{ text = await res.text(); }
+  catch(e){ return again('讀取回應失敗（' + ((e && e.message) || e) + '）'); }
+
+  if(!res.ok) return again('伺服器回應 ' + res.status + '，請稍後再試一次');
+
+  let json;
+  try{ json = JSON.parse(text); }
+  catch(e){ return again('回應格式異常：' + String(text).replace(/<[^>]*>/g, ' ').trim().slice(0, 60)); }
+
+  if(!json || json.success === false) throw new Error((json && json.error) || 'API error');
   return json.data;
 }
 
@@ -136,8 +164,10 @@ async function start(){
   const liffReady = LIFF_ID && !LIFF_ID.startsWith('PASTE') && window.liff;
   if(liffReady){
     try{
+      STAGE = 'liff.init';
       await liff.init({ liffId: LIFF_ID });
       if(!liff.isLoggedIn()){ liff.login(); return; }
+      STAGE = 'liff.getProfile';
       const p = await liff.getProfile();
       PROFILE = { userId:p.userId, displayName:p.displayName };
       MODE = 'line';
@@ -145,6 +175,7 @@ async function start(){
       // 加好友檢查：Partner mode 跳過（不引導加 OA）
       if (!IS_PARTNER) {
         try {
+          STAGE = 'liff.getFriendship';
           const fr = await liff.getFriendship();
           if (fr && fr.friendFlag === false) { renderAddFriend(); return; }
         } catch(e) {}
@@ -155,7 +186,7 @@ async function start(){
       // ⚠️ 已經拿到 LINE 身分卻出錯 → 一定要把錯誤顯示出來。
       //    原本會靜默掉到下面的「請從 LINE 開啟」，客人看到的訊息完全誤導，
       //    而且真正的錯誤被藏起來，根本無從查起。
-      if (PROFILE && PROFILE.userId) { renderError((e && e.message) || String(e)); return; }
+      if (PROFILE && PROFILE.userId) { renderError(((e && e.message) || String(e)) + '　[' + STAGE + ']'); return; }
     }
   }
   MODE = 'preview';
@@ -221,7 +252,7 @@ async function doLogin(){
     if(r.bound){ renderOrders(r.orders); return; }
     if(r.candidates && r.candidates.length){ renderCandidates(r.candidates); return; }
     renderNotFound();
-  }catch(e){ renderError(e.message); }
+  }catch(e){ renderError(((e && e.message) || String(e)) + '　[' + STAGE + ']'); }
 }
 
 function renderCandidates(cands){
@@ -248,7 +279,7 @@ async function pickCandidate(c){
     const r = await callGAS('customerBind', { userId:PROFILE.userId, displayName:PROFILE.displayName, key:c.key, info:c.info });
     if(r && r.error){ renderMsg('⚠️', '無法綁定', r.error); return; }
     renderOrders(r.orders);
-  }catch(e){ renderError(e.message); }
+  }catch(e){ renderError(((e && e.message) || String(e)) + '　[' + STAGE + ']'); }
 }
 
 function renderMsg(emoji, title, sub){
@@ -431,14 +462,26 @@ function renderOrders(orders){
     app.innerHTML = '<div class="card center"><p style="font-size:40px;margin:6px 0">📦</p><p style="font-weight:800;margin:0 0 4px">目前沒有訂單</p><p class="muted" style="font-size:13px;margin:0">有新訂單後就會出現在這裡</p></div>';
     return;
   }
+  STAGE = 'render:packages';
   const pkgs = buildPackages(orders);   // ✅ 要先建索引，itemBlock 和 orderCard 都會用到
   buildMergeGroups(orders);
+  STAGE = 'render:cards';
+  // ✅ 單一筆訂單資料異常時只跳過那一筆，其餘照常顯示
+  //    —— 不要讓一筆壞資料害客人整頁看不到訂單
+  const safeCard = (o) => {
+    try { return orderCard(o); }
+    catch(err){
+      console.error('orderCard failed', o && o.id, err);
+      return '<div class="card"><b>' + esc(String((o && o.id) || '訂單')) + '</b>'
+           + '<p class="muted" style="font-size:12px;margin:6px 0 0">這筆訂單顯示異常（' + esc(String((err && err.message) || err)) + '），請截圖告知小幫手</p></div>';
+    }
+  };
   const open = orders.filter(o=>o.shippingStatus!=='已出貨');
   const done = orders.filter(o=>o.shippingStatus==='已出貨');
   let html = '';
   html += packagesBlock(pkgs);
   html += '<p class="muted" style="font-size:13px;margin:16px 4px 2px">訂單與付款・進行中（'+open.length+'）</p>';
-  html += open.length ? open.map(orderCard).join('') : '<div class="card center muted" style="font-size:13px">沒有進行中的訂單 🎉</div>';
+  html += open.length ? open.map(safeCard).join('') : '<div class="card center muted" style="font-size:13px">沒有進行中的訂單 🎉</div>';
   if(done.length){
     html += '<p class="muted" style="font-size:13px;margin:22px 4px 2px">已完成（'+done.length+'）</p>';
     html += '<button class="btn ghost block" id="showPast" style="margin-top:4px">📦 查看過往訂單（'+done.length+'）</button>';
@@ -453,7 +496,7 @@ function renderOrders(orders){
   if(done.length){
     var _btn = document.getElementById('showPast');
     if(_btn) _btn.onclick = function(){
-      document.getElementById('pastWrap').innerHTML = done.map(orderCard).join('');
+      document.getElementById('pastWrap').innerHTML = done.map(safeCard).join('');
       _btn.style.display = 'none';
     };
   }
