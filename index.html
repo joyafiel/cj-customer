@@ -109,7 +109,10 @@ let PROFILE = { userId:'', displayName:'' };
 
 function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function money(n){ return '$' + (Number(n)||0).toLocaleString(); }
-function loading(){ app.innerHTML = '<div class="spin"></div>'; }
+function loading(note){
+  app.innerHTML = '<div class="spin"></div>'
+    + (note ? '<p class="muted center" style="font-size:12px;margin-top:10px">'+esc(note)+'</p>' : '');
+}
 
 // 點商品圖放大看清楚（原圖，不是縮圖）
 function openLightbox(url){
@@ -127,23 +130,37 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 // ✅ GAS 的 POST 會被轉址到 script.googleusercontent.com 取回內容，那一段偶發會回 404。
 //    原本直接 res.json()，遇到 404 拿到的是 HTML，只會丟出看不懂的解析錯誤。
 //    改成：先讀純文字 → 失敗自動重試 2 次 → 真的不行才回報「看得懂的原因」。
+const API_TIMEOUT_MS = 15000;   // 單次請求上限；超過就放棄這一次，不讓客人對著轉圈乾等
 async function callGAS(action, payload={}, _retry=0){
   STAGE = 'api:' + action + (_retry ? '(重試' + _retry + ')' : '');
-  const again = async (why) => {
-    if(_retry < 2){ await sleep(700 * (_retry + 1)); return callGAS(action, payload, _retry + 1); }
+  if(_retry) loading('連線不太順，重試中…（' + _retry + '/2）');
+
+  // 逾時（卡住）只重試 1 次，因為那代表伺服器忙、再等下去只是倍數放大等待；
+  // 快速失敗（404／格式錯）才重試 2 次，那種隔一秒通常就成功了。
+  const again = async (why, wasTimeout) => {
+    const max = wasTimeout ? 1 : 2;
+    if(_retry < max){ await sleep(wasTimeout ? 1200 : 700 * (_retry + 1)); return callGAS(action, payload, _retry + 1); }
     throw new Error(why);
   };
 
   let res;
+  const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), API_TIMEOUT_MS) : null;
   try{
     res = await fetch(GAS_URL, {
       method:'POST',
       headers:{ 'Content-Type':'text/plain;charset=utf-8' },
-      body: JSON.stringify({ api:true, action, ...payload })
+      body: JSON.stringify({ api:true, action, ...payload }),
+      signal: ctrl ? ctrl.signal : undefined
     });
   }catch(e){
-    return again('連線失敗，請確認網路後重試（' + ((e && e.message) || e) + '）');
+    if(timer) clearTimeout(timer);
+    const aborted = e && (e.name === 'AbortError' || String(e).indexOf('abort') !== -1);
+    return again(aborted
+      ? '伺服器回應太慢（超過 ' + (API_TIMEOUT_MS/1000) + ' 秒），請稍後再試一次'
+      : '連線失敗，請確認網路後重試（' + ((e && e.message) || e) + '）', aborted);
   }
+  if(timer) clearTimeout(timer);
 
   let text = '';
   try{ text = await res.text(); }
@@ -245,14 +262,53 @@ function renderSearch(){
   document.getElementById('pv').addEventListener('keydown', e=>{ if(e.key==='Enter') document.getElementById('pvBtn').click(); });
 }
 
+// ✅ 把上次看到的訂單存在客人自己的手機上，下次一開先立刻顯示，同時在背景抓最新的。
+//    GAS 冷啟動 + 轉址那幾秒是架構成本，省不掉；但可以讓客人「不用盯著轉圈等」。
+//    只存 24 小時、以 LINE userId 為 key，換帳號不會看到別人的。
+const LOCAL_ORDERS_KEY = 'cjOrdersCache_v1';
+function readLocalOrders(uid){
+  try{
+    const c = JSON.parse(localStorage.getItem(LOCAL_ORDERS_KEY) || 'null');
+    if(!c || c.uid !== uid) return null;
+    if(Date.now() - (c.ts || 0) > 86400000) return null;
+    return Array.isArray(c.orders) && c.orders.length ? c.orders : null;
+  }catch(e){ return null; }
+}
+function saveLocalOrders(uid, orders){
+  try{ localStorage.setItem(LOCAL_ORDERS_KEY, JSON.stringify({ uid, ts: Date.now(), orders: orders || [] })); }catch(e){}
+}
+function refreshBar(text){
+  const old = document.getElementById('refreshBar');
+  if(old) old.remove();
+  if(!text) return;
+  const bar = document.createElement('div');
+  bar.id = 'refreshBar';
+  bar.className = 'card center muted';
+  bar.style.cssText = 'font-size:12px;padding:8px;margin-bottom:8px';
+  bar.textContent = text;
+  app.insertBefore(bar, app.firstChild);
+}
+
 async function doLogin(){
-  loading();
+  // 先畫上次的資料（有的話），客人立刻看得到東西
+  let shownCached = false;
+  const cached = readLocalOrders(PROFILE.userId);
+  if(cached){
+    try{ renderOrders(cached); refreshBar('更新中…'); shownCached = true; }
+    catch(e){ console.error('cached render failed', e); shownCached = false; }
+  }
+  if(!shownCached) loading();
+
   try{
     const r = await callGAS('customerLogin', { userId:PROFILE.userId, displayName:PROFILE.displayName });
-    if(r.bound){ renderOrders(r.orders); return; }
+    if(r.bound){ saveLocalOrders(PROFILE.userId, r.orders); renderOrders(r.orders); return; }
     if(r.candidates && r.candidates.length){ renderCandidates(r.candidates); return; }
     renderNotFound();
-  }catch(e){ renderError(((e && e.message) || String(e)) + '　[' + STAGE + ']'); }
+  }catch(e){
+    // 已經顯示過舊資料就不要整頁換成錯誤畫面，只提示這是舊的
+    if(shownCached){ refreshBar('目前顯示的是上次的資料，網路恢復後重開即可更新'); return; }
+    renderError(((e && e.message) || String(e)) + '　[' + STAGE + ']');
+  }
 }
 
 function renderCandidates(cands){
