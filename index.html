@@ -262,54 +262,24 @@ function renderSearch(){
   document.getElementById('pv').addEventListener('keydown', e=>{ if(e.key==='Enter') document.getElementById('pvBtn').click(); });
 }
 
-// ✅ 把上次看到的訂單存在客人自己的手機上，下次一開先立刻顯示，同時在背景抓最新的。
-//    GAS 冷啟動 + 轉址那幾秒是架構成本，省不掉；但可以讓客人「不用盯著轉圈等」。
-//    只存 24 小時、以 LINE userId 為 key，換帳號不會看到別人的。
-const LOCAL_ORDERS_KEY = 'cjOrdersCache_v1';
-function readLocalOrders(uid){
-  try{
-    const c = JSON.parse(localStorage.getItem(LOCAL_ORDERS_KEY) || 'null');
-    if(!c || c.uid !== uid) return null;
-    if(Date.now() - (c.ts || 0) > 86400000) return null;
-    return Array.isArray(c.orders) && c.orders.length ? c.orders : null;
-  }catch(e){ return null; }
-}
-function saveLocalOrders(uid, orders){
-  try{ localStorage.setItem(LOCAL_ORDERS_KEY, JSON.stringify({ uid, ts: Date.now(), orders: orders || [] })); }catch(e){}
-}
-function refreshBar(text){
-  const old = document.getElementById('refreshBar');
-  if(old) old.remove();
-  if(!text) return;
-  const bar = document.createElement('div');
-  bar.id = 'refreshBar';
-  bar.className = 'card center muted';
-  bar.style.cssText = 'font-size:12px;padding:8px;margin-bottom:8px';
-  bar.textContent = text;
-  app.insertBefore(bar, app.firstChild);
-}
-
+// ⚠️ 2026/08 移除「本機快取先顯示」：
+//    有客人看到別人的訂單。不論根因是不是快取，把訂單資料存在客人手機上都會讓
+//    錯誤資料黏住 24 小時 —— 就算伺服器端修好，她還是看到舊的錯資料。
+//    正確性優先於載入速度，這段先不要。
 async function doLogin(){
-  // 先畫上次的資料（有的話），客人立刻看得到東西
-  let shownCached = false;
-  const cached = readLocalOrders(PROFILE.userId);
-  if(cached){
-    try{ renderOrders(cached); refreshBar('更新中…'); shownCached = true; }
-    catch(e){ console.error('cached render failed', e); shownCached = false; }
-  }
-  if(!shownCached) loading();
-
+  loading();
   try{
     const r = await callGAS('customerLogin', { userId:PROFILE.userId, displayName:PROFILE.displayName });
-    if(r.bound){ saveLocalOrders(PROFILE.userId, r.orders); renderOrders(r.orders); return; }
+    if(r.bound){ renderOrders(r.orders); return; }
     if(r.candidates && r.candidates.length){ renderCandidates(r.candidates); return; }
     renderNotFound();
   }catch(e){
-    // 已經顯示過舊資料就不要整頁換成錯誤畫面，只提示這是舊的
-    if(shownCached){ refreshBar('目前顯示的是上次的資料，網路恢復後重開即可更新'); return; }
     renderError(((e && e.message) || String(e)) + '　[' + STAGE + ']');
   }
 }
+
+// 清掉舊版留在客人手機上的快取，避免有人一直看到錯的資料
+try{ localStorage.removeItem('cjOrdersCache_v1'); }catch(e){}
 
 function renderCandidates(cands){
   let html = '<div class="card">'
