@@ -401,7 +401,7 @@ function shortDate(d){
 //
 //    ⚠️ 日期來源是 it.shipDate。只有「解析得出完整年月日」的才算數；
 //    沒有日期（出貨日期欄啟用前的歷史資料）或格式看不懂的，一律當成舊的收起來。
-//    最壞情況：全部都解析不出來 → 只展開最新 1 個，仍然比現在好，不會壞掉。
+//    最壞情況：全部都解析不出來 → 只展開最新 1 個，仍然比原本好，不會壞掉。
 var PKG_RECENT_DAYS = 30;   // 幾天內算「進行中」
 var PKG_MIN_OPEN    = 1;    // 至少展開幾個（久久沒下單的客人也要看得到最後一包）
 var PKG_MAX_OPEN    = 4;    // 最多展開幾個（一個月內寄很多次也不要洗版）
@@ -464,6 +464,65 @@ function packagesBlock(list){
     PKG_OLDER_HTML = '';
   }
   return h;
+}
+var PKG_OLDER_HTML = '';
+
+// ✅ 併單群組：同一個賣場連結＝尾款只收一次（跟出貨無關）
+var MERGE_GROUPS = {};   // storeLink -> { ids:[], anchorId }
+function buildMergeGroups(orders){
+  MERGE_GROUPS = {};
+  const g = {};
+  (orders||[]).forEach(o=>{
+    const k = String(o.storeLink||'').trim();
+    if(!k) return;
+    (g[k]=g[k]||[]).push(o);
+  });
+  Object.keys(g).forEach(k=>{
+    if(g[k].length < 2) return;
+    let anchor = null;
+    g[k].forEach(o=>{ if((Number(o.remaining)||0) > 0 && !anchor) anchor = o; });
+    MERGE_GROUPS[k] = { ids: g[k].map(o=>o.id), anchorId: anchor ? anchor.id : '' };
+  });
+}
+
+function orderCard(o){
+  const badge = o.shippingStatus==='已出貨' ? '<span class="badge b-done">🟢 已出貨</span>'
+            : o.shippingStatus==='部分出貨' ? '<span class="badge b-part">🔵 部分出貨</span>'
+            : '<span class="badge b-wait">🟠 備貨中</span>';
+  const items = (o.items||[]).map(itemBlock).join('');
+  const depositDue = Number(o.depositDue)||0;
+  const unpaidDep = Math.max(0, depositDue - (Number(o.deposit)||0));
+  const fullyShipped = o.shippingStatus==='已出貨';
+  // ✅ 全部出貨＝尾款已由賣貨便貨到付款收走，視為已結清（跟 ERP 後台邏輯一致）
+  const rem = fullyShipped ? 0 : (Number(o.remaining)||0);
+
+  const rows = [];
+  // 訂金那行：只有這張單真的需要收訂金時才顯示（VIP/批發訂金為0就跳過）
+  if (depositDue > 0) {
+    rows.push(unpaidDep > 0
+      ? '<div class="money-row"><span class="lbl">訂金</span><span class="unpaid">待付 '+money(unpaidDep)+'</span></div>'
+      : '<div class="money-row"><span class="lbl">訂金</span><span class="paid">✓ 已付清</span></div>');
+  }
+  // 尾款那行
+  // ✅ 併單：尾款整筆掛在主單，其他單顯示「併入 ORDxxx 收取」而不是「已結清」
+  //    寫已結清會讓客人以為自己付過了，事實上是由另一張單一起收
+  const grp = MERGE_GROUPS[String(o.storeLink||'').trim()];
+  if (rem > 0) {
+    rows.push('<div class="money-row"><span class="lbl">尾款</span><span class="unpaid">待付 '+money(rem)+'</span></div>');
+    if (grp && grp.anchorId === o.id) {
+      rows.push('<div class="merge-note">取貨時付款・已含此次 '+grp.ids.length+' 張訂單</div>');
+    }
+  } else if (!fullyShipped && grp && grp.anchorId && grp.anchorId !== o.id) {
+    rows.push('<div class="money-row"><span class="lbl">尾款</span><span class="muted">併入 '+esc(grp.anchorId)+' 收取</span></div>');
+  } else {
+    rows.push('<div class="money-row"><span class="lbl">尾款</span><span class="paid">✓ 已結清'+(fullyShipped?'（貨到付款）':'')+'</span></div>');
+  }
+  const due = '<div class="money-rows">' + rows.join('') + '</div>';
+  return '<div class="card">'
+    + '<div class="ord-head"><div><div class="ord-id">'+esc(o.id)+'</div><div class="ord-date">成立日 '+esc(o.createdAt||'')+'</div></div>'+badge+'</div>'
+    + '<div style="margin-top:8px">'+items+'</div>'
+    + '<div class="ord-foot"><span class="total">訂單總額 <b>'+money(o.total)+'</b></span>'+due+'</div>'
+    + '</div>';
 }
 
 function renderOrders(orders){
