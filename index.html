@@ -427,78 +427,43 @@ function pkgCard(p){
 function packagesBlock(list){
   if(!list.length) return '';
   const newestFirst = list.slice().reverse();
-  const recent = newestFirst.slice(0, PKG_SHOW);
-  const older  = newestFirst.slice(PKG_SHOW);
-  let h = '<p class="muted" style="font-size:13px;margin:16px 4px 2px">出貨進度（共 '+list.length+' 個包裹'
-        + (older.length ? '，顯示最近 '+recent.length+' 個' : '') + '）</p>';
+
+  // list 已經由舊到新排好（沒日期的排最前），反轉後就是由新到舊、沒日期的在最後，
+  // 所以「一遇到超過 30 天或沒日期的就停」是安全的
+  var openCount = 0;
+  for(var i = 0; i < newestFirst.length; i++){
+    var age = pkgAgeDays(newestFirst[i].date);
+    if(age === null || age > PKG_RECENT_DAYS) break;
+    openCount++;
+  }
+  if(openCount < PKG_MIN_OPEN) openCount = PKG_MIN_OPEN;
+  if(openCount > PKG_MAX_OPEN) openCount = PKG_MAX_OPEN;
+  if(openCount > newestFirst.length) openCount = newestFirst.length;
+
+  const recent = newestFirst.slice(0, openCount);
+  const older  = newestFirst.slice(openCount);
+
+  // 診斷：日期格式如果解析不出來，這裡的「距今」會是 null —— 把它回報給我看
+  try{
+    var _d0 = newestFirst[0] && newestFirst[0].date;
+    console.log('[pkg] 最新包裹日期 =', JSON.stringify(_d0), '→ 距今', pkgAgeDays(_d0), '天　展開',
+                openCount, '/', newestFirst.length);
+  }catch(e){}
+
+  let h = '<p class="muted" style="font-size:13px;margin:16px 4px 2px">出貨進度（共 '+list.length+' 個包裹）</p>';
   h += recent.map(pkgCard).join('');
   if(older.length){
-    h += '<button class="btn ghost block" id="showOldPkg" style="margin-top:8px">📦 查看更早的包裹（'+older.length+'）</button>';
+    // older 是由新到舊，所以最後一個才是最舊的 ——「⋯起」要用最舊那個的日期
+    var from = '';
+    for(var j = older.length - 1; j >= 0; j--){ if(older[j].date){ from = shortDate(older[j].date); break; } }
+    h += '<button class="btn ghost block" id="showOldPkg" style="margin-top:8px">▸ 更早的出貨紀錄（'
+       + older.length + ' 個包裹' + (from ? '，' + esc(from) + ' 起' : '') + '）</button>';
     h += '<div id="oldPkgWrap"></div>';
     PKG_OLDER_HTML = older.map(pkgCard).join('');
   } else {
     PKG_OLDER_HTML = '';
   }
   return h;
-}
-var PKG_OLDER_HTML = '';
-
-// ✅ 併單群組：同一個賣場連結＝尾款只收一次（跟出貨無關）
-var MERGE_GROUPS = {};   // storeLink -> { ids:[], anchorId }
-function buildMergeGroups(orders){
-  MERGE_GROUPS = {};
-  const g = {};
-  (orders||[]).forEach(o=>{
-    const k = String(o.storeLink||'').trim();
-    if(!k) return;
-    (g[k]=g[k]||[]).push(o);
-  });
-  Object.keys(g).forEach(k=>{
-    if(g[k].length < 2) return;
-    let anchor = null;
-    g[k].forEach(o=>{ if((Number(o.remaining)||0) > 0 && !anchor) anchor = o; });
-    MERGE_GROUPS[k] = { ids: g[k].map(o=>o.id), anchorId: anchor ? anchor.id : '' };
-  });
-}
-
-function orderCard(o){
-  const badge = o.shippingStatus==='已出貨' ? '<span class="badge b-done">🟢 已出貨</span>'
-            : o.shippingStatus==='部分出貨' ? '<span class="badge b-part">🔵 部分出貨</span>'
-            : '<span class="badge b-wait">🟠 備貨中</span>';
-  const items = (o.items||[]).map(itemBlock).join('');
-  const depositDue = Number(o.depositDue)||0;
-  const unpaidDep = Math.max(0, depositDue - (Number(o.deposit)||0));
-  const fullyShipped = o.shippingStatus==='已出貨';
-  // ✅ 全部出貨＝尾款已由賣貨便貨到付款收走，視為已結清（跟 ERP 後台邏輯一致）
-  const rem = fullyShipped ? 0 : (Number(o.remaining)||0);
-
-  const rows = [];
-  // 訂金那行：只有這張單真的需要收訂金時才顯示（VIP/批發訂金為0就跳過）
-  if (depositDue > 0) {
-    rows.push(unpaidDep > 0
-      ? '<div class="money-row"><span class="lbl">訂金</span><span class="unpaid">待付 '+money(unpaidDep)+'</span></div>'
-      : '<div class="money-row"><span class="lbl">訂金</span><span class="paid">✓ 已付清</span></div>');
-  }
-  // 尾款那行
-  // ✅ 併單：尾款整筆掛在主單，其他單顯示「併入 ORDxxx 收取」而不是「已結清」
-  //    寫已結清會讓客人以為自己付過了，事實上是由另一張單一起收
-  const grp = MERGE_GROUPS[String(o.storeLink||'').trim()];
-  if (rem > 0) {
-    rows.push('<div class="money-row"><span class="lbl">尾款</span><span class="unpaid">待付 '+money(rem)+'</span></div>');
-    if (grp && grp.anchorId === o.id) {
-      rows.push('<div class="merge-note">取貨時付款・已含此次 '+grp.ids.length+' 張訂單</div>');
-    }
-  } else if (!fullyShipped && grp && grp.anchorId && grp.anchorId !== o.id) {
-    rows.push('<div class="money-row"><span class="lbl">尾款</span><span class="muted">併入 '+esc(grp.anchorId)+' 收取</span></div>');
-  } else {
-    rows.push('<div class="money-row"><span class="lbl">尾款</span><span class="paid">✓ 已結清'+(fullyShipped?'（貨到付款）':'')+'</span></div>');
-  }
-  const due = '<div class="money-rows">' + rows.join('') + '</div>';
-  return '<div class="card">'
-    + '<div class="ord-head"><div><div class="ord-id">'+esc(o.id)+'</div><div class="ord-date">成立日 '+esc(o.createdAt||'')+'</div></div>'+badge+'</div>'
-    + '<div style="margin-top:8px">'+items+'</div>'
-    + '<div class="ord-foot"><span class="total">訂單總額 <b>'+money(o.total)+'</b></span>'+due+'</div>'
-    + '</div>';
 }
 
 function renderOrders(orders){
