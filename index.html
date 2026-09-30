@@ -393,8 +393,27 @@ function shortDate(d){
   const m = String(d||'').match(/(\d{1,2})\/(\d{1,2})$/);
   return m ? (m[1]+'/'+m[2]) : String(d||'');
 }
-// 預設展開幾個包裹（最新的在上面）；老客人累積幾十個包裹時不會把整頁佔滿
-var PKG_SHOW = 3;
+// 🔴 2026/09/30：展開規則從「最近 N 個」改成「最近 30 天內寄出的」。
+//
+//    為什麼：客人打開這頁是想知道「我的東西寄了嗎、到哪了」。
+//    三個月前的包裹是「紀錄」不是「進度」—— 攤在最上面等於
+//    買越多次的客人越難找到今天的包裹。方向反了。
+//
+//    ⚠️ 日期來源是 it.shipDate。只有「解析得出完整年月日」的才算數；
+//    沒有日期（出貨日期欄啟用前的歷史資料）或格式看不懂的，一律當成舊的收起來。
+//    最壞情況：全部都解析不出來 → 只展開最新 1 個，仍然比現在好，不會壞掉。
+var PKG_RECENT_DAYS = 30;   // 幾天內算「進行中」
+var PKG_MIN_OPEN    = 1;    // 至少展開幾個（久久沒下單的客人也要看得到最後一包）
+var PKG_MAX_OPEN    = 4;    // 最多展開幾個（一個月內寄很多次也不要洗版）
+
+// 回傳「距今幾天」；解析不出完整年月日就回 null
+function pkgAgeDays(d){
+  var m = String(d||'').match(/(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/);
+  if(!m) return null;
+  var t = new Date(Number(m[1]), Number(m[2])-1, Number(m[3])).getTime();
+  if(!isFinite(t)) return null;
+  return Math.floor((Date.now() - t) / 86400000);
+}
 function pkgCard(p){
   const rows = p.items.map(x=>
     '<div>'+esc(x.name)+(x.spec?' <span class="muted">('+esc(x.spec)+')</span>':'')+' ×'+(x.qty||1)
