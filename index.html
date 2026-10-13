@@ -206,9 +206,12 @@ async function start(){
       if (PROFILE && PROFILE.userId) { renderError(((e && e.message) || String(e)) + '　[' + STAGE + ']'); return; }
     }
   }
+  // 🔴 2026/10/13：舊版這裡是 renderSearch()（打名字查單）。
+  //    那條路靠的是候選名單，而候選名單已經關閉 —— 打什麼都查不到。
+  //    沒有 LINE 身分就是沒有身分，直接講，不要給一個按了沒用的輸入框。
   MODE = 'preview';
   PROFILE = { userId:'', displayName:'' };
-  renderSearch();
+  renderNeedLine();
 }
 
 function renderMe(pic, name){
@@ -310,7 +313,8 @@ async function pickCandidate(c){
 
 function renderMsg(emoji, title, sub){
   app.innerHTML = '<div class="card center"><p style="font-size:36px;margin:6px 0">'+emoji+'</p><p style="font-weight:800;margin:0 0 4px">'+esc(title)+'</p><p class="muted" style="font-size:13px;margin:0 0 14px">'+esc(sub||'')+'</p><button class="btn ghost" id="back">返回</button></div>';
-  document.getElementById('back').onclick = ()=>{ renderSearch(); };
+  // 返回不要回到「打名字查單」—— 那條路已經關了，回到起點重跑身分判斷
+  document.getElementById('back').onclick = ()=>{ start(); };
 }
 
 function renderNeedLine(){
@@ -571,14 +575,38 @@ function renderOrders(orders){
   }
 }
 
+/* 開啟官方帳號聊天室，讓客人直接找小幫手 */
+function openHelper(){
+  const id = (OA_ID||'').trim();
+  if(!id || id.indexOf('PASTE')===0) return false;
+  const url = 'https://line.me/R/ti/p/' + encodeURIComponent(id);
+  try{ liff.openWindow({ url:url, external:false }); }catch(e){ location.href = url; }
+  return true;
+}
+
+// 🔴 2026/10/13：拿掉「換個名字試試」。
+//
+//    候選名單已經關閉（GAS 的 customerLogin 一律回空陣列），所以
+//    **不管客人打什麼名字，結果都是這一頁** —— 舊文案等於叫他做一件做不到的事，
+//    他會一直試、然後認為系統壞掉。
+//
+//    在新的驗證流程（後五碼／7-11 取件編號／認商品）上線之前，
+//    唯一真的走得通的路就是找小幫手，所以這裡直接給他那條路。
 function renderNotFound(){
+  const canHelp = (OA_ID||'').trim() && (OA_ID||'').indexOf('PASTE') !== 0;
   app.innerHTML = '<div class="card center">'
     + '<p style="font-size:40px;margin:6px 0">🔍</p>'
-    + '<p style="font-weight:800;margin:0 0 4px">找不到你的訂單</p>'
-    + '<p class="muted" style="font-size:13px;margin:0 0 14px">可能是暱稱跟訂單上的名字不同，換個名字試試</p>'
-    + '<button class="btn ghost block" id="retry">換個名字找</button>'
+    + '<p style="font-weight:800;margin:0 0 4px">還沒有跟你的帳號對上</p>'
+    + '<p class="muted" style="font-size:13px;line-height:1.9;margin:0 0 16px">'
+    +   '第一次查單需要確認一次身分，<br>小幫手幫你對好之後，以後點進來就直接看得到。'
+    + '</p>'
+    + (canHelp ? '<button class="btn block" id="helper">傳訊息給小幫手</button>' : '')
+    + '<p class="muted" style="font-size:12px;line-height:1.8;margin:14px 0 0">'
+    +   '跟小幫手說「要綁定查單」就可以了'
+    + '</p>'
     + '</div>';
-  document.getElementById('retry').onclick = ()=>{ renderSearch(); };
+  const b = document.getElementById('helper');
+  if(b) b.onclick = ()=>{ openHelper(); };
 }
 
 function renderError(msg){
