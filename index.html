@@ -106,6 +106,7 @@ const app = document.getElementById('app');
 const meEl = document.getElementById('me');
 let MODE = 'line';
 let PROFILE = { userId:'', displayName:'' };
+let BOUND_CID = '';   // 綁定後的客戶編號，補登頁拿它猜社群ID
 
 function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function money(n){ return '$' + (Number(n)||0).toLocaleString(); }
@@ -273,9 +274,10 @@ async function doLogin(){
   loading();
   try{
     const r = await callGAS('customerLogin', { userId:PROFILE.userId, displayName:PROFILE.displayName });
-    if(r.bound){ renderOrders(r.orders); return; }
-    if(r.candidates && r.candidates.length){ renderCandidates(r.candidates); return; }
-    renderNotFound();
+    if(r.bound){ BOUND_CID = r.customerId || ''; renderOrders(r.orders); return; }
+    // 🔴 候選名單已經永久關閉（GAS 一律回空陣列）。沒綁定就走綁定流程。
+    if(!PROFILE.userId){ renderNeedLine(); return; }
+    renderChoose();
   }catch(e){
     renderError(((e && e.message) || String(e)) + '　[' + STAGE + ']');
   }
@@ -575,6 +577,256 @@ function renderOrders(orders){
   }
 }
 
+// ============================================================
+// 綁定流程（2026/10/13）
+//
+// 取代舊的「請確認你是哪一位」候選名單 —— 那份名單把其他客人的姓名
+// 和訂單張數印給一個還沒證明身分的人看，點錯就是永久綁定。
+//
+//   分流   你在 CJ 買過東西嗎？
+//   新朋友 建檔（沒有訂單＝沒有東西可以被偷，不用驗證）
+//   老客人 後五碼 ／ 7-11 取件編號 ／ 認商品，擇一通過
+//   通過後 補登社群ID／電話／門市
+//
+// 🔴 這一整段畫面都不顯示任何其他客人的姓名。
+// ============================================================
+
+/* 共用：卡片外殼 */
+function bCard(inner){ return '<div class="card">' + inner + '</div>'; }
+/* 共用：返回列 */
+function bBack(fn){
+  return '<p style="margin:0 0 12px"><a href="#" id="bBack" style="font-size:13px;text-decoration:none">← 返回</a></p>';
+}
+function bWireBack(fn){
+  const b = document.getElementById('bBack');
+  if(b) b.onclick = (e)=>{ e.preventDefault(); fn(); };
+}
+
+/* ① 分流 */
+function renderChoose(){
+  app.innerHTML = bCard(
+      '<p style="font-weight:800;font-size:18px;margin:2px 0 6px">歡迎回來</p>'
+    + '<p class="muted" style="font-size:13px;line-height:1.9;margin:0 0 20px">'
+    +   '為了確保你只會看到自己的訂單，<br>第一次使用要先確認一次身分。'
+    + '</p>'
+    + '<p style="font-weight:700;font-size:13px;margin:0 0 10px">你在 CJ STUDIO 買過東西嗎？</p>'
+    + '<button class="btn block" id="bOld" style="text-align:left;padding:15px 16px">'
+    +   '<span style="display:block;font-size:15px;font-weight:700">買過，我要查我的訂單</span>'
+    +   '<span style="display:block;font-size:11.5px;opacity:.72;margin-top:3px">需要確認一項訂單上的資訊</span>'
+    + '</button>'
+    + '<button class="btn ghost block" id="bNew" style="margin-top:10px;text-align:left;padding:15px 16px">'
+    +   '<span style="display:block;font-size:15px;font-weight:700">還沒買過，我是新朋友</span>'
+    +   '<span style="display:block;font-size:11.5px;color:#9b938a;margin-top:3px">留個資料，之後下單就對得上</span>'
+    + '</button>'
+  );
+  document.getElementById('bOld').onclick = ()=> renderVerify();
+  document.getElementById('bNew').onclick = ()=> renderRegister();
+}
+
+/* ② 新朋友建檔 */
+function renderRegister(){
+  const f = (id,label,ph,hint)=>
+      '<div style="margin-bottom:14px">'
+    + '<label for="'+id+'" style="display:block;font-size:12px;font-weight:700;margin-bottom:6px">'+label+'</label>'
+    + '<input class="input" id="'+id+'" placeholder="'+esc(ph)+'">'
+    + '<p class="muted" style="font-size:10.5px;line-height:1.7;margin:5px 2px 0">'+esc(hint)+'</p>'
+    + '</div>';
+  app.innerHTML = bCard(
+      bBack()
+    + '<p style="font-weight:800;font-size:16px;margin:0 0 6px">新朋友建檔</p>'
+    + '<p class="muted" style="font-size:12px;line-height:1.85;margin:0 0 16px">'
+    +   '你還沒有訂單，所以這一步不需要驗證。留個資料，之後下單就對得上。</p>'
+    + f('rSid','社群內暱稱（ID）','例：胖少爺','你在社群下單時用的名字。這會成為你的客戶編號')
+    + f('rName','收件人姓名','王小美','7-11 取件要對本名')
+    + f('rPhone','聯絡電話','09xx-xxx-xxx','取件通知用；之後換手機重新綁定也靠它')
+    + f('rStore','7-11 店名＋門市編號','例：幸安門市 123456','開賣場會直接帶入')
+    + '<button class="btn block" id="rGo" style="margin-top:4px">完成建檔</button>'
+  );
+  bWireBack(renderChoose);
+  document.getElementById('rGo').onclick = async ()=>{
+    const v = id => document.getElementById(id).value.trim();
+    if(!v('rSid') || !v('rName') || !v('rPhone') || !v('rStore')){
+      renderMsg('⚠️','還有欄位沒填','四個欄位都要填喔'); return;
+    }
+    loading();
+    try{
+      const r = await callGAS('customerRegister', { payload:{
+        userId:PROFILE.userId, displayName:PROFILE.displayName,
+        sid:v('rSid'), name:v('rName'), phone:v('rPhone'), store:v('rStore')
+      }});
+      if(r && r.error){ renderMsg('⚠️','無法建檔', r.error); return; }
+      renderOrders(r.orders || []);
+    }catch(e){ renderError(((e && e.message) || String(e)) + '　[' + STAGE + ']'); }
+  };
+}
+
+/* ③ 老客人選驗證方式 */
+function renderVerify(){
+  app.innerHTML = bCard(
+      bBack()
+    + '<p style="font-weight:800;font-size:16px;margin:0 0 6px">確認身分</p>'
+    + '<p class="muted" style="font-size:12px;line-height:1.85;margin:0 0 4px">下面任選一項，答得出來就可以。</p>'
+    + '<p class="muted" style="font-size:11.5px;line-height:1.8;margin:0 0 16px">'
+    +   '我們不會問你的名字 —— 名字會撞，而且問了也證明不了是你。</p>'
+    + '<button class="btn ghost block" id="vA" style="text-align:left;padding:14px 15px">'
+    +   '<span style="display:block;font-size:14px;font-weight:700">A　匯款後五碼</span>'
+    +   '<span style="display:block;font-size:11px;color:#9b938a;margin-top:2px">任何一次匯款給 CJ 的帳號後五碼</span>'
+    + '</button>'
+    + '<button class="btn ghost block" id="vB" style="margin-top:9px;text-align:left;padding:14px 15px">'
+    +   '<span style="display:block;font-size:14px;font-weight:700">B　7-11 取件編號</span>'
+    +   '<span style="display:block;font-size:11px;color:#9b938a;margin-top:2px">出貨通知裡 CM 開頭那一串</span>'
+    + '</button>'
+    + '<button class="btn ghost block" id="vC" style="margin-top:9px;text-align:left;padding:14px 15px">'
+    +   '<span style="display:block;font-size:14px;font-weight:700">C　認一下你買過什麼</span>'
+    +   '<span style="display:block;font-size:11px;color:#9b938a;margin-top:2px">四選一，共兩題。都想不起來時用這個</span>'
+    + '</button>'
+    + '<p class="muted" style="font-size:11.5px;margin:18px 0 8px">三項都想不起來？</p>'
+    + '<button class="btn ghost block" id="vHelp">請小幫手幫我確認</button>'
+  );
+  bWireBack(renderChoose);
+  document.getElementById('vA').onclick = ()=> renderVerifyInput('last5');
+  document.getElementById('vB').onclick = ()=> renderVerifyInput('cm');
+  document.getElementById('vC').onclick = ()=> startQuiz();
+  document.getElementById('vHelp').onclick = ()=> askHelp();
+}
+
+/* ③a 輸入憑證 */
+function renderVerifyInput(method){
+  const isA = method === 'last5';
+  app.innerHTML = bCard(
+      bBack()
+    + '<p style="font-weight:800;font-size:16px;margin:0 0 6px">'+(isA?'匯款後五碼':'7-11 取件編號')+'</p>'
+    + '<p class="muted" style="font-size:12px;line-height:1.85;margin:0 0 14px">'
+    +   (isA ? '任何一次匯款給 CJ 的帳號後五碼都可以，不用是最近那一次。'
+           : '在小幫手傳給你的出貨通知裡，或 7-11 賣貨便的簡訊上。')
+    + '</p>'
+    + '<input class="input" id="vVal" inputmode="'+(isA?'numeric':'text')+'" placeholder="'
+    +   (isA?'12345':'CM123456789')+'" style="text-align:center;letter-spacing:2px;font-size:16px">'
+    + '<button class="btn block" id="vGo" style="margin-top:12px">送出確認</button>'
+  );
+  bWireBack(renderVerify);
+  const go = async ()=>{
+    const val = document.getElementById('vVal').value.trim();
+    if(!val) return;
+    loading();
+    try{
+      const r = await callGAS('customerVerify', { payload:{
+        userId:PROFILE.userId, displayName:PROFILE.displayName, method:method, value:val
+      }});
+      if(r && r.bound){ renderProfile(r.orders || []); return; }
+      renderVerifyFail((r && r.error) || '查不到符合的資料');
+    }catch(e){ renderError(((e && e.message) || String(e)) + '　[' + STAGE + ']'); }
+  };
+  document.getElementById('vGo').onclick = go;
+  document.getElementById('vVal').addEventListener('keydown', e=>{ if(e.key==='Enter') go(); });
+}
+
+function renderVerifyFail(msg){
+  app.innerHTML = bCard(
+      '<p class="center" style="font-size:34px;margin:6px 0">🤔</p>'
+    + '<p class="center" style="font-weight:800;margin:0 0 6px">'+esc(msg)+'</p>'
+    + '<p class="muted center" style="font-size:12px;line-height:1.85;margin:0 0 16px">換另一種方式試試，或請小幫手幫你確認。</p>'
+    + '<button class="btn block" id="fRetry">換一種方式</button>'
+    + '<button class="btn ghost block" id="fHelp" style="margin-top:9px">請小幫手幫我確認</button>'
+  );
+  document.getElementById('fRetry').onclick = ()=> renderVerify();
+  document.getElementById('fHelp').onclick = ()=> askHelp();
+}
+
+/* ④ 認商品 */
+let QUIZ_TOKEN = '';
+async function startQuiz(){
+  loading();
+  try{
+    const r = await callGAS('customerQuiz', { payload:{
+      userId:PROFILE.userId, displayName:PROFILE.displayName, action:'start'
+    }});
+    if(!r || !r.ok){ renderVerifyFail((r && r.error) || '找不到可以確認的資料'); return; }
+    QUIZ_TOKEN = r.token;
+    renderQuiz(r);
+  }catch(e){ renderError(((e && e.message) || String(e)) + '　[' + STAGE + ']'); }
+}
+
+function renderQuiz(q){
+  // 🔴 選項文字直接從伺服器來，一律 esc() —— 商品名是客人看得到的資料，不是程式碼
+  let body =
+      '<p class="muted" style="font-size:12px;margin:0 0 10px">確認身分 · 第 '+q.round+' 題，共 '+q.total+' 題</p>'
+    + '<p style="font-weight:800;font-size:16px;margin:0 0 4px">下面哪一件是你買過的？</p>'
+    + '<p class="muted" style="font-size:11.5px;line-height:1.8;margin:0 0 16px">'
+    +   '挑你有印象的那一個就好，不確定可以選「都不是我買的」。</p>';
+  (q.choices || []).forEach((c,i)=>{
+    body += '<button class="btn ghost block" data-i="'+i+'" style="margin-bottom:9px;text-align:left;'
+          + 'padding:14px 15px;font-size:14px;font-weight:500;line-height:1.6">'+esc(c)+'</button>';
+  });
+  body += '<button class="btn ghost block" id="qNone" style="margin-top:4px;font-size:13px;color:#9b938a">都不是我買的</button>';
+  app.innerHTML = bCard(body);
+  app.querySelectorAll('.btn[data-i]').forEach(b=>{
+    b.onclick = ()=> answerQuiz(q.choices[Number(b.dataset.i)]);
+  });
+  document.getElementById('qNone').onclick = ()=> answerQuiz('');
+}
+
+async function answerQuiz(pick){
+  loading();
+  try{
+    const r = await callGAS('customerQuiz', { payload:{
+      userId:PROFILE.userId, displayName:PROFILE.displayName,
+      action:'answer', token:QUIZ_TOKEN, pick:pick
+    }});
+    if(r && r.bound){ renderProfile(r.orders || []); return; }
+    if(r && r.ok && r.choices){ renderQuiz(r); return; }
+    renderVerifyFail((r && r.error) || '沒辦法確認是你');
+  }catch(e){ renderError(((e && e.message) || String(e)) + '　[' + STAGE + ']'); }
+}
+
+/* ⑤ 通過後補登 —— 🔴 電話必填，社群ID 系統先猜一個讓他確認 */
+function renderProfile(orders){
+  const f = (id,label,val,ph,hint,req)=>
+      '<div style="margin-bottom:14px">'
+    + '<label for="'+id+'" style="display:block;font-size:12px;font-weight:700;margin-bottom:6px">'+label
+    +   '<span style="margin-left:5px;font-size:10px;font-weight:700;color:'+(req?'#B04A4A':'#9b938a')+'">'+(req?'必填':'選填')+'</span>'
+    + '</label>'
+    + '<input class="input" id="'+id+'" value="'+esc(val||'')+'" placeholder="'+esc(ph)+'">'
+    + '<p class="muted" style="font-size:10.5px;line-height:1.7;margin:5px 2px 0">'+esc(hint)+'</p>'
+    + '</div>';
+  const guess = String(BOUND_CID||'').replace(/^(ID:|NM:)/,'');
+  app.innerHTML = bCard(
+      '<p style="font-weight:800;font-size:16px;margin:2px 0 4px">✅ 身分確認完成</p>'
+    + '<p class="muted" style="font-size:12px;line-height:1.85;margin:0 0 18px">'
+    +   '這支 LINE 帳號已經跟你的訂單綁好了，以後點進來直接看。</p>'
+    + f('pSid','社群內暱稱（ID）',guess,'例：胖少爺','系統從你的訂單猜的，不對請改掉',true)
+    + f('pPhone','聯絡電話','','09xx-xxx-xxx','取件通知用；之後換手機重新綁定也靠它',true)
+    + f('pStore','7-11 店名＋門市編號','','例：幸安門市 123456','填了之後開賣場直接帶入',false)
+    + '<button class="btn block" id="pGo" style="margin-top:4px">存起來，看我的訂單</button>'
+  );
+  document.getElementById('pGo').onclick = async ()=>{
+    const v = id => document.getElementById(id).value.trim();
+    if(!v('pSid') || !v('pPhone')){ renderMsg('⚠️','還有欄位沒填','社群暱稱和電話要填喔'); return; }
+    loading();
+    try{
+      await callGAS('customerProfile', { payload:{
+        userId:PROFILE.userId, sid:v('pSid'), phone:v('pPhone'), store:v('pStore')
+      }});
+    }catch(e){}
+    renderOrders(orders || []);
+  };
+}
+
+/* 轉人工 */
+async function askHelp(){
+  loading();
+  try{ await callGAS('requestHelp', { payload:{ userId:PROFILE.userId, displayName:PROFILE.displayName } }); }catch(e){}
+  app.innerHTML = bCard(
+      '<p class="center" style="font-size:34px;margin:6px 0">💬</p>'
+    + '<p class="center" style="font-weight:800;margin:0 0 6px">已經通知小幫手了</p>'
+    + '<p class="muted center" style="font-size:12.5px;line-height:1.9;margin:0 0 16px">'
+    +   '她幫你對好之後，你再點一次查單連結就看得到了。<br>想快一點的話也可以直接傳訊息給她。</p>'
+    + ((OA_ID||'').indexOf('PASTE')===0 ? '' : '<button class="btn block" id="hGo">傳訊息給小幫手</button>')
+  );
+  const b = document.getElementById('hGo');
+  if(b) b.onclick = ()=> openHelper();
+}
+
 /* 開啟官方帳號聊天室，讓客人直接找小幫手 */
 function openHelper(){
   const id = (OA_ID||'').trim();
@@ -592,6 +844,8 @@ function openHelper(){
 //
 //    在新的驗證流程（後五碼／7-11 取件編號／認商品）上線之前，
 //    唯一真的走得通的路就是找小幫手，所以這裡直接給他那條路。
+// 🔴 2026/10/13 起，沒綁定一律走綁定流程（分流 → 驗證 → 補登），
+//    不再停在死路。這一支留著當保底，正常情況不會被呼叫到。
 function renderNotFound(){
   const canHelp = (OA_ID||'').trim() && (OA_ID||'').indexOf('PASTE') !== 0;
   app.innerHTML = '<div class="card center">'
