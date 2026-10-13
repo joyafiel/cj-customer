@@ -655,6 +655,7 @@ function renderRegister(){
         sid:v('rSid'), name:v('rName'), phone:v('rPhone'), store:v('rStore')
       }});
       if(r && r.error){ renderMsg('⚠️','無法建檔', r.error); return; }
+      BOUND_CID = r.customerId || '';
       renderOrders(r.orders || []);
     }catch(e){ renderError(((e && e.message) || String(e)) + '　[' + STAGE + ']'); }
   };
@@ -713,7 +714,8 @@ function renderVerifyInput(method){
       const r = await callGAS('customerVerify', { payload:{
         userId:PROFILE.userId, displayName:PROFILE.displayName, method:method, value:val
       }});
-      if(r && r.bound){ renderProfile(r.orders || []); return; }
+      // 🔴 補登頁要靠 BOUND_CID 猜社群ID，這裡沒設的話那一格會是空的
+      if(r && r.bound){ BOUND_CID = r.customerId || ''; renderProfile(r.orders || []); return; }
       renderVerifyFail((r && r.error) || '查不到符合的資料');
     }catch(e){ renderError(((e && e.message) || String(e)) + '　[' + STAGE + ']'); }
   };
@@ -773,7 +775,7 @@ async function answerQuiz(pick){
       userId:PROFILE.userId, displayName:PROFILE.displayName,
       action:'answer', token:QUIZ_TOKEN, pick:pick
     }});
-    if(r && r.bound){ renderProfile(r.orders || []); return; }
+    if(r && r.bound){ BOUND_CID = r.customerId || ''; renderProfile(r.orders || []); return; }
     if(r && r.ok && r.choices){ renderQuiz(r); return; }
     renderVerifyFail((r && r.error) || '沒辦法確認是你');
   }catch(e){ renderError(((e && e.message) || String(e)) + '　[' + STAGE + ']'); }
@@ -812,17 +814,38 @@ function renderProfile(orders){
   };
 }
 
-/* 轉人工 */
+/* 轉人工
+ *
+ * 🔴 送不出去就不可以說「已經通知了」。
+ *    舊版把呼叫包在 try 裡然後無條件顯示成功畫面 ——
+ *    通知沒送到時，客人以為在等、小幫手什麼都沒收到，兩邊都不會發現。
+ *    這正是這個系統被咬最多次的形狀：**靜默失敗**。
+ */
 async function askHelp(){
   loading();
-  try{ await callGAS('requestHelp', { payload:{ userId:PROFILE.userId, displayName:PROFILE.displayName } }); }catch(e){}
-  app.innerHTML = bCard(
-      '<p class="center" style="font-size:34px;margin:6px 0">💬</p>'
-    + '<p class="center" style="font-weight:800;margin:0 0 6px">已經通知小幫手了</p>'
-    + '<p class="muted center" style="font-size:12.5px;line-height:1.9;margin:0 0 16px">'
-    +   '她幫你對好之後，你再點一次查單連結就看得到了。<br>想快一點的話也可以直接傳訊息給她。</p>'
-    + ((OA_ID||'').indexOf('PASTE')===0 ? '' : '<button class="btn block" id="hGo">傳訊息給小幫手</button>')
-  );
+  let ok = false;
+  try{
+    const r = await callGAS('requestHelp', { payload:{ userId:PROFILE.userId, displayName:PROFILE.displayName } });
+    ok = !!(r && r.ok);
+  }catch(e){}
+
+  const btn = (OA_ID||'').indexOf('PASTE')===0 ? ''
+    : '<button class="btn block" id="hGo">傳訊息給小幫手</button>';
+
+  app.innerHTML = ok
+    ? bCard(
+        '<p class="center" style="font-size:34px;margin:6px 0">💬</p>'
+      + '<p class="center" style="font-weight:800;margin:0 0 6px">已經通知小幫手了</p>'
+      + '<p class="muted center" style="font-size:12.5px;line-height:1.9;margin:0 0 16px">'
+      +   '她幫你對好之後，你再點一次查單連結就看得到了。<br>想快一點的話也可以直接傳訊息給她。</p>'
+      + btn)
+    : bCard(
+        '<p class="center" style="font-size:34px;margin:6px 0">⚠️</p>'
+      + '<p class="center" style="font-weight:800;margin:0 0 6px">通知沒有送出去</p>'
+      + '<p class="muted center" style="font-size:12.5px;line-height:1.9;margin:0 0 16px">'
+      +   '麻煩你直接傳訊息給小幫手，<br>跟她說「要綁定查單」就可以了。</p>'
+      + btn);
+
   const b = document.getElementById('hGo');
   if(b) b.onclick = ()=> openHelper();
 }
