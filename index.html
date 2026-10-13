@@ -797,17 +797,21 @@ function renderProfile(orders){
     + '<p class="muted" style="font-size:12px;line-height:1.85;margin:0 0 18px">'
     +   '這支 LINE 帳號已經跟你的訂單綁好了，以後點進來直接看。</p>'
     + f('pSid','社群內暱稱（ID）',guess,'例：胖少爺','系統從你的訂單猜的，不對請改掉',true)
+    + f('pName','收件人姓名','','王小美','7-11 取件要對本名',true)
     + f('pPhone','聯絡電話','','09xx-xxx-xxx','取件通知用；之後換手機重新綁定也靠它',true)
     + f('pStore','7-11 店名＋門市編號','','例：幸安門市 123456','填了之後開賣場直接帶入',false)
     + '<button class="btn block" id="pGo" style="margin-top:4px">存起來，看我的訂單</button>'
   );
   document.getElementById('pGo').onclick = async ()=>{
     const v = id => document.getElementById(id).value.trim();
-    if(!v('pSid') || !v('pPhone')){ renderMsg('⚠️','還有欄位沒填','社群暱稱和電話要填喔'); return; }
+    if(!v('pSid') || !v('pName') || !v('pPhone')){
+      renderMsg('⚠️','還有欄位沒填','社群暱稱、姓名、電話都要填喔'); return;
+    }
     loading();
     try{
       await callGAS('customerProfile', { payload:{
-        userId:PROFILE.userId, sid:v('pSid'), phone:v('pPhone'), store:v('pStore')
+        userId:PROFILE.userId, sid:v('pSid'), name:v('pName'),
+        phone:v('pPhone'), store:v('pStore')
       }});
     }catch(e){}
     renderOrders(orders || []);
