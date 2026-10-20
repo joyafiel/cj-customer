@@ -274,7 +274,15 @@ async function doLogin(){
   loading();
   try{
     const r = await callGAS('customerLogin', { userId:PROFILE.userId, displayName:PROFILE.displayName });
-    if(r.bound){ BOUND_CID = r.customerId || ''; renderOrders(r.orders); return; }
+    if(r.bound){
+      BOUND_CID = r.customerId || '';
+      // 🔴 2026/10/15：舊客人也要補資料。
+      //    綁好的人以前一進來就直接看訂單，再也不會看到那張表單 ——
+      //    所以已綁定但沒填的人，永遠不會填。
+      //    needProfile 是伺服器判斷的：本名或電話任一沒填就是 true。
+      if(r.needProfile && r.needProfile.need){ renderProfile(r.orders || [], r.needProfile, 'old'); return; }
+      renderOrders(r.orders); return;
+    }
     // 🔴 候選名單已經永久關閉（GAS 一律回空陣列）。沒綁定就走綁定流程。
     if(!PROFILE.userId){ renderNeedLine(); return; }
     renderChoose();
@@ -656,6 +664,9 @@ function renderRegister(){
       }});
       if(r && r.error){ renderMsg('⚠️','無法建檔', r.error); return; }
       BOUND_CID = r.customerId || '';
+      // 🔴 建檔表單四格都填了，照理說不會缺。會缺就代表那四格根本沒寫進 Members
+      //    （10/13–10/14 就是這個狀況），那就當場讓他再存一次，不要靜靜放過去。
+      if(r.needProfile && r.needProfile.need){ renderProfile(r.orders || [], r.needProfile, 'old'); return; }
       renderOrders(r.orders || []);
     }catch(e){ renderError(((e && e.message) || String(e)) + '　[' + STAGE + ']'); }
   };
@@ -715,7 +726,7 @@ function renderVerifyInput(method){
         userId:PROFILE.userId, displayName:PROFILE.displayName, method:method, value:val
       }});
       // 🔴 補登頁要靠 BOUND_CID 猜社群ID，這裡沒設的話那一格會是空的
-      if(r && r.bound){ BOUND_CID = r.customerId || ''; renderProfile(r.orders || []); return; }
+      if(r && r.bound){ BOUND_CID = r.customerId || ''; renderProfile(r.orders || [], r.needProfile); return; }
       renderVerifyFail((r && r.error) || '查不到符合的資料');
     }catch(e){ renderError(((e && e.message) || String(e)) + '　[' + STAGE + ']'); }
   };
@@ -775,14 +786,29 @@ async function answerQuiz(pick){
       userId:PROFILE.userId, displayName:PROFILE.displayName,
       action:'answer', token:QUIZ_TOKEN, pick:pick
     }});
-    if(r && r.bound){ BOUND_CID = r.customerId || ''; renderProfile(r.orders || []); return; }
+    if(r && r.bound){ BOUND_CID = r.customerId || ''; renderProfile(r.orders || [], r.needProfile); return; }
     if(r && r.ok && r.choices){ renderQuiz(r); return; }
     renderVerifyFail((r && r.error) || '沒辦法確認是你');
   }catch(e){ renderError(((e && e.message) || String(e)) + '　[' + STAGE + ']'); }
 }
 
-/* ⑤ 通過後補登 —— 🔴 電話必填，社群ID 系統先猜一個讓他確認 */
-function renderProfile(orders){
+/* ⑤ 補登資料 —— 🔴 電話必填，社群ID 系統先猜一個讓他確認
+ *
+ * 🔴 2026/10/15 改了三件事：
+ *   ① 存不進去不可以說存好了。舊版是 try{ await … }catch(e){} 然後
+ *      無條件 renderOrders —— 連回傳值都沒看。10/13 和 10/14 兩位客人
+ *      就是這樣：他們填了四格，Members 三欄空白，兩邊都不知道。
+ *   ② 已經填過的欄位要帶回來（pre），不要叫人重打一次。
+ *   ③ mode='old' 給已經綁好、但缺本名／電話的舊客人看，文案不一樣 ——
+ *      對他們說「身分確認完成」很怪，他們根本沒驗證。
+ *
+ * @param orders 填完要顯示的訂單
+ * @param pre    { sid, name, phone, store } 伺服器回的現有值，用來預填
+ * @param mode   'old' = 舊客人補登（可以跳過）；其他 = 剛驗證完（不可跳過）
+ */
+function renderProfile(orders, pre, mode){
+  pre = pre || {};
+  const isOld = mode === 'old';
   const f = (id,label,val,ph,hint,req)=>
       '<div style="margin-bottom:14px">'
     + '<label for="'+id+'" style="display:block;font-size:12px;font-weight:700;margin-bottom:6px">'+label
@@ -791,29 +817,59 @@ function renderProfile(orders){
     + '<input class="input" id="'+id+'" value="'+esc(val||'')+'" placeholder="'+esc(ph)+'">'
     + '<p class="muted" style="font-size:10.5px;line-height:1.7;margin:5px 2px 0">'+esc(hint)+'</p>'
     + '</div>';
-  const guess = String(BOUND_CID||'').replace(/^(ID:|NM:)/,'');
+  const guess = String(pre.sid||'').trim() || String(BOUND_CID||'').replace(/^(ID:|NM:)/,'');
   app.innerHTML = bCard(
-      '<p style="font-weight:800;font-size:16px;margin:2px 0 4px">✅ 身分確認完成</p>'
-    + '<p class="muted" style="font-size:12px;line-height:1.85;margin:0 0 18px">'
-    +   '這支 LINE 帳號已經跟你的訂單綁好了，以後點進來直接看。</p>'
+      (isOld
+        ? '<p style="font-weight:800;font-size:16px;margin:2px 0 4px">📋 還差一點資料</p>'
+        + '<p class="muted" style="font-size:12px;line-height:1.85;margin:0 0 18px">'
+        +   '你的訂單都在。只是我們手上還沒有你的本名和電話 ——<br>'
+        +   '7-11 取件要對本名，出貨通知也要有電話才送得到。填一次就好。</p>'
+        : '<p style="font-weight:800;font-size:16px;margin:2px 0 4px">✅ 身分確認完成</p>'
+        + '<p class="muted" style="font-size:12px;line-height:1.85;margin:0 0 18px">'
+        +   '這支 LINE 帳號已經跟你的訂單綁好了，以後點進來直接看。</p>')
     + f('pSid','社群內暱稱（ID）',guess,'例：胖少爺','系統從你的訂單猜的，不對請改掉',true)
-    + f('pName','收件人姓名','','王小美','7-11 取件要對本名',true)
-    + f('pPhone','聯絡電話','','09xx-xxx-xxx','取件通知用；之後換手機重新綁定也靠它',true)
-    + f('pStore','7-11 店名＋門市編號','','例：幸安門市 123456','填了之後開賣場直接帶入',false)
+    + f('pName','收件人姓名',pre.name,'王小美','7-11 取件要對本名',true)
+    + f('pPhone','聯絡電話',pre.phone,'09xx-xxx-xxx','取件通知用；之後換手機重新綁定也靠它',true)
+    + f('pStore','7-11 店名＋門市編號',pre.store,'例：幸安門市 123456','填了之後開賣場直接帶入',false)
     + '<button class="btn block" id="pGo" style="margin-top:4px">存起來，看我的訂單</button>'
+    // 舊客人已經有訂單了，擋著不讓看會換來一通客訴。下次進來還是會再問。
+    // 🔴 要改成「不填不給看」的話，把下面這一行刪掉就好。
+    + (isOld ? '<button class="btn ghost block" id="pSkip" style="margin-top:9px">先跳過，下次再填</button>' : '')
   );
+  if(isOld) document.getElementById('pSkip').onclick = ()=> renderOrders(orders || []);
   document.getElementById('pGo').onclick = async ()=>{
     const v = id => document.getElementById(id).value.trim();
     if(!v('pSid') || !v('pName') || !v('pPhone')){
       renderMsg('⚠️','還有欄位沒填','社群暱稱、姓名、電話都要填喔'); return;
     }
+    // 畫面等一下會被換掉，先把他打的東西留著，重試才不用重打
+    const typed = { sid:v('pSid'), name:v('pName'), phone:v('pPhone'), store:v('pStore') };
     loading();
+    let r = null, thrown = '';
     try{
-      await callGAS('customerProfile', { payload:{
-        userId:PROFILE.userId, sid:v('pSid'), name:v('pName'),
-        phone:v('pPhone'), store:v('pStore')
+      r = await callGAS('customerProfile', { payload:{
+        userId:PROFILE.userId, sid:typed.sid, name:typed.name,
+        phone:typed.phone, store:typed.store
       }});
-    }catch(e){}
+    }catch(e){ thrown = (e && e.message) || String(e); }
+
+    // 🔴 沒有真的寫進去就不要跳走。ok 是伺服器「確實寫了幾欄」才給的。
+    if(!(r && r.ok)){
+      const why = thrown || (r && r.error) || '伺服器沒有回應';
+      app.innerHTML = bCard(
+          '<p class="center" style="font-size:34px;margin:6px 0">⚠️</p>'
+        + '<p class="center" style="font-weight:800;margin:0 0 6px">資料沒有存進去</p>'
+        + '<p class="muted center" style="font-size:12px;line-height:1.85;margin:0 0 16px">'
+        +   esc(why) + '<br>你的訂單不受影響，可以先看。</p>'
+        + '<button class="btn block" id="eRetry">再存一次</button>'
+        + '<button class="btn ghost block" id="eSkip" style="margin-top:9px">先看訂單</button>'
+        + '<button class="btn ghost block" id="eHelp" style="margin-top:9px">請小幫手幫我</button>'
+      );
+      document.getElementById('eRetry').onclick = ()=> renderProfile(orders, typed, mode);
+      document.getElementById('eSkip').onclick  = ()=> renderOrders(orders || []);
+      document.getElementById('eHelp').onclick  = ()=> askHelp();
+      return;
+    }
     renderOrders(orders || []);
   };
 }
