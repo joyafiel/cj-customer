@@ -21,6 +21,10 @@
   .btn{ display:inline-flex; align-items:center; justify-content:center; gap:6px; border:none; border-radius:14px; padding:12px 18px; font-size:15px; font-weight:700; cursor:pointer; background:var(--brand); color:#fff; }
   .btn.ghost{ background:#fff; color:var(--brand); border:1px solid var(--line); }
   .btn.block{ width:100%; }
+  /* 🔴 2026/10/23：.btn 是 inline-flex，所以裡面兩個 <span style="display:block">
+     會被當成 flex item 並排，說明文字擠到標題右邊去。
+     要上下排就得改 flex 方向，光靠 display:block 沒有用。 */
+  .btn.stack{ flex-direction:column; align-items:flex-start; gap:0; }
   .input{ width:100%; padding:12px 14px; border:1px solid var(--line); border-radius:14px; font-size:15px; outline:none; background:#fff; }
   .input:focus{ border-color:var(--brand); }
   .spin{ width:30px; height:30px; border:3px solid var(--line); border-top-color:var(--brand); border-radius:50%; animation:s 1s linear infinite; margin:30px auto; }
@@ -603,7 +607,7 @@ function renderOrders(orders){
 function bCard(inner){ return '<div class="card">' + inner + '</div>'; }
 /* 共用：返回列 */
 function bBack(fn){
-  return '<p style="margin:0 0 12px"><a href="#" id="bBack" style="font-size:13px;text-decoration:none">← 返回</a></p>';
+  return '<p style="margin:0 0 12px"><a href="#" id="bBack" style="font-size:13px;text-decoration:none;color:var(--muted);font-weight:700">← 返回</a></p>';
 }
 function bWireBack(fn){
   const b = document.getElementById('bBack');
@@ -680,15 +684,15 @@ function renderVerify(){
     + '<p class="muted" style="font-size:12px;line-height:1.85;margin:0 0 4px">下面任選一項，答得出來就可以。</p>'
     + '<p class="muted" style="font-size:11.5px;line-height:1.8;margin:0 0 16px">'
     +   '我們不會問你的名字 —— 名字會撞，而且問了也證明不了是你。</p>'
-    + '<button class="btn ghost block" id="vA" style="text-align:left;padding:14px 15px">'
+    + '<button class="btn ghost block stack" id="vA" style="text-align:left;padding:14px 15px">'
     +   '<span style="display:block;font-size:14px;font-weight:700">A　匯款後五碼</span>'
     +   '<span style="display:block;font-size:11px;color:#9b938a;margin-top:2px">任何一次匯款給 CJ 的帳號後五碼</span>'
     + '</button>'
-    + '<button class="btn ghost block" id="vB" style="margin-top:9px;text-align:left;padding:14px 15px">'
+    + '<button class="btn ghost block stack" id="vB" style="margin-top:9px;text-align:left;padding:14px 15px">'
     +   '<span style="display:block;font-size:14px;font-weight:700">B　7-11 取件編號</span>'
     +   '<span style="display:block;font-size:11px;color:#9b938a;margin-top:2px">出貨通知裡 CM 開頭那一串</span>'
     + '</button>'
-    + '<button class="btn ghost block" id="vC" style="margin-top:9px;text-align:left;padding:14px 15px">'
+    + '<button class="btn ghost block stack" id="vC" style="margin-top:9px;text-align:left;padding:14px 15px">'
     +   '<span style="display:block;font-size:14px;font-weight:700">C　認一下你買過什麼</span>'
     +   '<span style="display:block;font-size:11px;color:#9b938a;margin-top:2px">四選一，共兩題。都想不起來時用這個</span>'
     + '</button>'
