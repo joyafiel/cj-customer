@@ -656,15 +656,27 @@ function renderRegister(){
   );
   bWireBack(renderChoose);
   document.getElementById('rGo').onclick = async ()=>{
-    const v = id => document.getElementById(id).value.trim();
+    const v = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
     if(!v('rSid') || !v('rName') || !v('rPhone') || !v('rStore')){
       renderMsg('⚠️','還有欄位沒填','四個欄位都要填喔'); return;
     }
+    // 🔴 2026/10/24：一定要在 loading() **之前**把值抓下來。
+    //
+    //    loading() 會把 app.innerHTML 整個換掉 —— 那四個 input 當場消失。
+    //    舊版在 loading() 之後才讀 v('rSid')，document.getElementById 回 null，
+    //    於是 `null.value` 爆掉，被下面的 catch 接住 → 客人看到「連線出了點問題」。
+    //
+    //    而且 STAGE 還停在開頁時的 api:customerLogin（customerRegister 根本沒送出），
+    //    所以錯誤訊息指向完全無關的地方，很難查。
+    //
+    //    ⚠️ 同一個形狀的 bug 在 renderProfile 已經修過（那裡叫 typed），
+    //       但當時只改了一邊 —— 兩個表單是同一套寫法，應該一起看。
+    const typed = { sid:v('rSid'), name:v('rName'), phone:v('rPhone'), store:v('rStore') };
     loading();
     try{
       const r = await callGAS('customerRegister', { payload:{
         userId:PROFILE.userId, displayName:PROFILE.displayName,
-        sid:v('rSid'), name:v('rName'), phone:v('rPhone'), store:v('rStore')
+        sid:typed.sid, name:typed.name, phone:typed.phone, store:typed.store
       }});
       if(r && r.error){ renderMsg('⚠️','無法建檔', r.error); return; }
       BOUND_CID = r.customerId || '';
