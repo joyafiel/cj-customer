@@ -42,6 +42,14 @@ main{ background:#fff; border-top:1px solid var(--line); padding:12px; min-heigh
       font-size:13.5px; font-weight:700; background:var(--brand); color:#fff; cursor:pointer; }
 .btn.ghost{ background:#fff; color:var(--brand); border:1px solid var(--line); }
 .btn:active{ transform:scale(.99); }
+.warn{ background:#FBECEC; border:1px solid #ecd4d4; border-radius:12px; padding:10px 12px;
+        font-size:12px; line-height:1.8; color:#8a4a4a; margin-bottom:10px; }
+.warn b{ color:#A8403F; }
+.mini{ display:block; width:100%; margin-top:8px; border:1px solid #e0bcbc; background:#fff;
+       color:#A8403F; border-radius:9px; padding:7px; font:inherit; font-size:11.5px;
+       font-weight:700; cursor:pointer; }
+.row.ghost{ background:#FFF8F8; border-color:#f0d8d8; }
+.c-ghost{ background:#FBECEC; color:#A8403F; }
 .empty{ text-align:center; color:var(--muted); font-size:12.5px; padding:34px 14px; line-height:1.9; }
 pre.rc{ white-space:pre-wrap; word-break:break-all; font:inherit; font-size:11px; line-height:1.8;
         background:var(--cream); border:1px solid var(--line); border-radius:12px;
@@ -83,7 +91,7 @@ pre.rc{ white-space:pre-wrap; word-break:break-all; font:inherit; font-size:11px
         Size         : Full
         Scopes       : profile ＋ **openid**  ← 🔴 沒勾 openid 就拿不到 ID Token
 */
-const LIFF_ID = "2008786061-A5sC4A4C";
+const LIFF_ID = "PASTE_STAFF_LIFF_ID";
 
 const GAS_URL = "https://script.google.com/macros/s/AKfycbzVrGHrtZh44PSTDA8K58opzMUFOshKwh8b9EA72D9kRI4f-dvGvCfmxbDir2_4aXNfSQ/exec";
 const API_TIMEOUT_MS = 30000;   // 這一頁要掃 Order_Items 全表，比客人頁慢，給寬一點
@@ -94,7 +102,7 @@ const nf = (n) => '$' + Number(n || 0).toLocaleString();
 
 let TOKEN = '';          // LIFF ID Token
 let DATA = null;         // getStaffAll 的結果
-let TAB = 'todo', Q = '', PICKED = null, DETAIL = null;
+let TAB = 'todo', Q = '', PICKED = null, DETAIL = null, ONLY_GHOST = false;
 let STAGE = 'boot';
 
 /* ── 呼叫 GAS ─────────────────────────────────── */
@@ -142,20 +150,42 @@ function drawTabs(){
     '<button class="tab' + (TAB===t.k?' on':'') + '" data-k="' + t.k + '">'
     + '<b>' + (t.n === '' ? '·' : t.n) + '</b>' + t.t + '</button>').join('');
   Array.from(document.querySelectorAll('.tab')).forEach(b =>
-    b.onclick = () => { TAB = b.dataset.k; Q=''; PICKED=null; DETAIL=null; draw(); });
+    b.onclick = () => { TAB = b.dataset.k; Q=''; PICKED=null; DETAIL=null; ONLY_GHOST=false; draw(); });
 }
 
 function listView(arr, unit){
   const q = Q.trim();
-  const f = q ? arr.filter(x => (x.name + x.spec + x.sku).indexOf(q) !== -1) : arr;
+  let f = q ? arr.filter(x => (x.name + x.spec + x.sku).indexOf(q) !== -1) : arr;
+
+  // 🔴 2026/10/24：「0 位客人」＝ 那一列明細的訂單編號在 Order_Management 裡找不到，
+  //    或那張單的顧客資訊是空的。不管哪一種，**它背後沒有人在等這個商品**。
+  //
+  //    這種列會害你照著待叫件去叫一個沒有人要的貨 —— 錢花出去、東西到了才發現
+  //    沒有訂單可以對。不會報錯、不會壞掉，只會燒錢，所以一定要在畫面上吼出來。
+  //
+  //    這不是這一頁造成的，是它讓人看見的 —— LINE 的今日待辦一直都含這些，
+  //    只是文字版沒有「N 位客人」這一欄。
+  const ghosts = arr.filter(x => !x.customers);
+  if(ONLY_GHOST) f = f.filter(x => !x.customers);
+
   const n = f.reduce((s,x)=>s+x.qty,0);
   return '<input class="search" id="q" placeholder="搜尋商品或款號…" value="' + esc(Q) + '">'
-    + '<div class="sum">' + (q ? '找到 ' : '共 ') + f.length + ' 種 / ' + n + ' 件'
-      + (q ? '　（全部 ' + arr.length + ' 種）' : '') + '</div>'
+    + (ghosts.length
+        ? '<div class="warn">🔴 有 <b>' + ghosts.length + ' 種 / '
+          + ghosts.reduce((s,x)=>s+x.qty,0) + ' 件</b>找不到對應的客人。'
+          + '<br>叫貨前先確認，不然會買到沒有人要的東西。'
+          + '<button class="mini" id="gf">' + (ONLY_GHOST ? '← 看全部' : '只看這些') + '</button></div>'
+        : '')
+    + '<div class="sum">' + (ONLY_GHOST ? '🔴 只看沒有客人的　' : q ? '找到 ' : '共 ')
+      + f.length + ' 種 / ' + n + ' 件'
+      + ((q || ONLY_GHOST) ? '　（全部 ' + arr.length + ' 種）' : '') + '</div>'
     + (f.length ? f.map(x =>
-        '<div class="row"><div class="fx">'
+        '<div class="row' + (x.customers ? '' : ' ghost') + '"><div class="fx">'
         + '<div><div class="n">' + esc(x.name) + (x.spec ? ' (' + esc(x.spec) + ')' : '') + '</div>'
-        + '<div class="m"><span>' + esc(x.sku) + '</span><span>' + x.customers + ' 位客人</span></div></div>'
+        + '<div class="m"><span>' + esc(x.sku) + '</span>'
+        + (x.customers
+            ? '<span>' + x.customers + ' 位客人</span>'
+            : '<span class="chip c-ghost">🔴 沒有客人，先別叫</span>') + '</div></div>'
         + '<div class="qty">' + x.qty + ' ' + unit + '</div>'
         + '</div></div>').join('')
       : '<div class="empty">沒有符合的商品</div>');
@@ -279,6 +309,7 @@ function draw(){
     Q = q.value; const p = q.selectionStart; draw();
     const n2 = $('q'); if(n2){ n2.focus(); try{ n2.setSelectionRange(p,p); }catch(e){} }
   };
+  if($('gf')) $('gf').onclick = () => { ONLY_GHOST = !ONLY_GHOST; draw(); };
   Array.from(document.querySelectorAll('[data-c]')).forEach(el =>
     el.onclick = () => openCustomer(el.dataset.c));
   if($('back')) $('back').onclick = () => { DETAIL = null; draw(); };
