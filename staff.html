@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CJ Studio 小幫手</title>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<style>
+:root{ --brand:#8C7B6C; --brand-dark:#6f6052; --cream:#FDFBF7; --line:#ece7df; --ink:#3d3a36; --muted:#9b938a; }
+*{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+body{ margin:0; font-family:-apple-system,"PingFang TC","Noto Sans TC",Roboto,sans-serif;
+      background:var(--cream); color:var(--ink); }
+header{ position:sticky; top:0; z-index:5; background:var(--cream); padding:14px 16px 10px;
+        border-bottom:1px solid var(--line); }
+.t{ font-weight:800; letter-spacing:.5px; font-size:15px; }
+.s{ font-size:10px; color:var(--muted); letter-spacing:2px; font-weight:500; }
+.asof{ float:right; font-size:10.5px; color:var(--muted); font-weight:500; }
+.tabs{ display:flex; gap:6px; padding:10px 10px 0; background:var(--cream);
+       position:sticky; top:57px; z-index:5; }
+.tab{ flex:1; border:1px solid var(--line); background:#fff; border-radius:12px 12px 0 0;
+      border-bottom:none; padding:8px 2px 7px; font:inherit; font-size:11px; font-weight:700;
+      color:var(--muted); cursor:pointer; text-align:center; line-height:1.35; }
+.tab.on{ background:var(--brand); color:#fff; border-color:var(--brand); }
+.tab b{ display:block; font-size:13px; }
+main{ background:#fff; border-top:1px solid var(--line); padding:12px; min-height:60vh; }
+.search{ width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:12px;
+         font:inherit; font-size:14px; outline:none; margin-bottom:10px; }
+.search:focus{ border-color:var(--brand); }
+.sum{ background:var(--cream); border:1px solid var(--line); border-radius:12px;
+      padding:9px 11px; font-size:11.5px; color:var(--brand-dark); margin-bottom:10px; font-weight:700; }
+.row{ border:1px solid var(--line); border-radius:12px; padding:9px 11px; margin-bottom:7px; }
+.row.tap{ cursor:pointer; }
+.row.tap:active{ background:var(--cream); }
+.n{ font-size:12.5px; font-weight:700; line-height:1.5; word-break:break-all; }
+.m{ font-size:10.5px; color:var(--muted); margin-top:3px; display:flex; gap:10px; flex-wrap:wrap; }
+.qty{ font-size:12px; font-weight:800; color:var(--brand); white-space:nowrap; }
+.fx{ display:flex; justify-content:space-between; gap:10px; align-items:flex-start; }
+.chip{ font-size:9.5px; font-weight:800; padding:2px 6px; border-radius:6px; white-space:nowrap; }
+.c-wait{ background:#FFF4E5; color:#C8741A; } .c-ok{ background:#E9F7EC; color:#2E8B45; }
+.c-ship{ background:#E9F1FF; color:#2E6BD6; } .c-dead{ background:#f2f2f2; color:#bbb; }
+.btn{ display:block; width:100%; border:0; border-radius:12px; padding:11px; font:inherit;
+      font-size:13.5px; font-weight:700; background:var(--brand); color:#fff; cursor:pointer; }
+.btn.ghost{ background:#fff; color:var(--brand); border:1px solid var(--line); }
+.btn:active{ transform:scale(.99); }
+.empty{ text-align:center; color:var(--muted); font-size:12.5px; padding:34px 14px; line-height:1.9; }
+pre.rc{ white-space:pre-wrap; word-break:break-all; font:inherit; font-size:11px; line-height:1.8;
+        background:var(--cream); border:1px solid var(--line); border-radius:12px;
+        padding:11px; margin:0 0 9px; max-height:40vh; overflow:auto; }
+.spin{ width:28px; height:28px; border:3px solid var(--line); border-top-color:var(--brand);
+       border-radius:50%; animation:sp 1s linear infinite; margin:40px auto; }
+@keyframes sp{ to{ transform:rotate(360deg); } }
+.err{ background:#FBECEC; border:1px solid #ecd4d4; border-radius:14px; padding:16px;
+      font-size:12.5px; line-height:1.9; color:#8a4a4a; }
+.err b{ color:#A8403F; }
+</style>
+</head>
+<body>
+<header>
+  <span class="asof" id="asof"></span>
+  <div class="t">CJ STUDIO</div>
+  <div class="s">小幫手</div>
+</header>
+<div class="tabs" id="tabs"></div>
+<main id="main"><div class="spin"></div></main>
+
+<script>
+/* ============================================================
+   CJ Studio · 小幫手頁　2026/10/24
+
+   🔴 這一頁會顯示**全部客人的訂單和金額**，所以：
+      ・身分一律由伺服器驗（LIFF ID Token → LINE 官方驗簽 → 比對 STAFF_LINE_IDS）
+      ・前端送的 userId 不算數，伺服器根本不看
+      ・「網址沒人知道」不是保護，白名單才是
+
+   資料層只有一份：GAS 的 _staffTodoRaw_()。
+   LINE 文字版、Flex 摘要卡、這一頁，三個出口都吃它 ——
+   不要在這裡自己算任何數字。
+   ============================================================ */
+
+/* 🔴 要自己填：給「小幫手頁」用的 LIFF ID（跟客人查單頁**不同**一支）
+      LINE Developers → 你的 LINE Login channel → LIFF → Add
+        Endpoint URL : 這一頁的網址（例如 https://cj-customer.vercel.app/staff.html）
+        Size         : Full
+        Scopes       : profile ＋ **openid**  ← 🔴 沒勾 openid 就拿不到 ID Token
+*/
+const LIFF_ID = "2008786061-A5sC4A4C";
+
+const GAS_URL = "https://script.google.com/macros/s/AKfycbzVrGHrtZh44PSTDA8K58opzMUFOshKwh8b9EA72D9kRI4f-dvGvCfmxbDir2_4aXNfSQ/exec";
+const API_TIMEOUT_MS = 30000;   // 這一頁要掃 Order_Items 全表，比客人頁慢，給寬一點
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const nf = (n) => '$' + Number(n || 0).toLocaleString();
+
+let TOKEN = '';          // LIFF ID Token
+let DATA = null;         // getStaffAll 的結果
+let TAB = 'todo', Q = '', PICKED = null, DETAIL = null;
+let STAGE = 'boot';
+
+/* ── 呼叫 GAS ─────────────────────────────────── */
+async function callGAS(action, payload){
+  STAGE = 'api:' + action;
+  const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), API_TIMEOUT_MS) : null;
+  let res;
+  try{
+    res = await fetch(GAS_URL, {
+      method:'POST',
+      headers:{ 'Content-Type':'text/plain;charset=utf-8' },
+      body: JSON.stringify({ api:true, action, payload: Object.assign({ idToken: TOKEN }, payload || {}) }),
+      signal: ctrl ? ctrl.signal : undefined
+    });
+  }catch(e){
+    if(timer) clearTimeout(timer);
+    const aborted = e && (e.name === 'AbortError');
+    throw new Error(aborted ? '伺服器回應太慢（超過 ' + (API_TIMEOUT_MS/1000) + ' 秒）' : '連線失敗：' + ((e && e.message) || e));
+  }
+  if(timer) clearTimeout(timer);
+  const text = await res.text();
+  if(!res.ok) throw new Error('伺服器回應 ' + res.status);
+  let json;
+  try{ json = JSON.parse(text); }
+  catch(e){ throw new Error('回應格式異常：' + String(text).replace(/<[^>]*>/g,' ').trim().slice(0,60)); }
+  if(!json || json.success === false) throw new Error((json && json.error) || 'API error');
+  // 🔴 data 是 undefined 代表那個 action 在 GAS 沒被接到（dispatch 漏了）。
+  //    伺服器會照樣回 success:true —— 2026/10/24 被這個騙了一整天，這裡擋住。
+  if(json.data === undefined) throw new Error('伺服器沒有處理 ' + action + '（code.gs 的 dispatch 可能漏了這一行）');
+  if(json.data && json.data.ok === false) throw new Error(json.data.error || '沒有權限');
+  return json.data;
+}
+
+/* ── 畫面 ─────────────────────────────────────── */
+const TABS = () => [
+  { k:'todo', t:'待叫件', n: DATA ? DATA.todo.length : '' },
+  { k:'pack', t:'可包貨', n: DATA ? DATA.pack.length : '' },
+  { k:'cust', t:'查單',   n: '' },
+  { k:'pay',  t:'待收款', n: DATA ? DATA.customers.filter(c => c.gap > 0).length : '' }
+];
+
+function drawTabs(){
+  $('tabs').innerHTML = TABS().map(t =>
+    '<button class="tab' + (TAB===t.k?' on':'') + '" data-k="' + t.k + '">'
+    + '<b>' + (t.n === '' ? '·' : t.n) + '</b>' + t.t + '</button>').join('');
+  Array.from(document.querySelectorAll('.tab')).forEach(b =>
+    b.onclick = () => { TAB = b.dataset.k; Q=''; PICKED=null; DETAIL=null; draw(); });
+}
+
+function listView(arr, unit){
+  const q = Q.trim();
+  const f = q ? arr.filter(x => (x.name + x.spec + x.sku).indexOf(q) !== -1) : arr;
+  const n = f.reduce((s,x)=>s+x.qty,0);
+  return '<input class="search" id="q" placeholder="搜尋商品或款號…" value="' + esc(Q) + '">'
+    + '<div class="sum">' + (q ? '找到 ' : '共 ') + f.length + ' 種 / ' + n + ' 件'
+      + (q ? '　（全部 ' + arr.length + ' 種）' : '') + '</div>'
+    + (f.length ? f.map(x =>
+        '<div class="row"><div class="fx">'
+        + '<div><div class="n">' + esc(x.name) + (x.spec ? ' (' + esc(x.spec) + ')' : '') + '</div>'
+        + '<div class="m"><span>' + esc(x.sku) + '</span><span>' + x.customers + ' 位客人</span></div></div>'
+        + '<div class="qty">' + x.qty + ' ' + unit + '</div>'
+        + '</div></div>').join('')
+      : '<div class="empty">沒有符合的商品</div>');
+}
+
+const CHIP = (s) => (s === '已抵台' || s === '備貨中') ? 'c-ok'
+                  : (s === '已出貨' || s === '斷貨')   ? 'c-dead'
+                  : (s === '已集運')                  ? 'c-ship' : 'c-wait';
+
+function custList(){
+  const q = Q.trim();
+  const f = (DATA.customers || []).filter(c => !q || c.name.indexOf(q) !== -1 || c.key.indexOf(q) !== -1);
+  return '<input class="search" id="q" placeholder="搜尋客人…" value="' + esc(Q) + '">'
+    + '<div class="sum">' + f.length + ' 位客人有未出貨訂單</div>'
+    + (f.length ? f.map(c =>
+        '<div class="row tap" data-c="' + esc(c.key) + '"><div class="fx">'
+        + '<div><div class="n">' + esc(c.name) + '</div>'
+        + '<div class="m"><span>' + c.orders + ' 張單</span><span>總額 ' + nf(c.total) + '</span>'
+        + '<span>已收 ' + nf(c.paid) + '</span></div></div>'
+        + '<div class="qty"' + (c.gap > 0 ? ' style="color:#C8741A"' : '') + '>'
+        + (c.gap > 0 ? '還缺 ' + nf(c.gap) : '✅') + '</div>'
+        + '</div></div>').join('')
+      : '<div class="empty">沒有符合的客人</div>');
+}
+
+function custDetail(){
+  const os = DETAIL.orders || [];
+  if(!os.length) return '<button class="btn ghost" id="back" style="margin-bottom:10px">← 回客人清單</button>'
+    + '<div class="empty">這位客人沒有未出貨的訂單</div>';
+
+  const total = os.reduce((s,o)=>s+o.total,0);
+  const due   = os.reduce((s,o)=>s+o.due,0);
+  const paid  = os.reduce((s,o)=>s+o.paid,0);
+  const rem   = os.reduce((s,o)=>s+o.rem,0);
+  // 🔴 依「賣場連結」分組，並把各組自己的待收尾款加起來。
+  //
+  //    客人要的是「我要去哪幾個賣場、各付多少」。一個賣場 ＝ 一個包裹 ＝ 一筆運費。
+  //    不要用訂單張數或寄件批次來講 —— 批次是你內部的分法，
+  //    客人看得到的只有賣場連結。還沒開賣場的那幾張要單獨講，不能混進去。
+  //
+  //    金額一律用伺服器回來的 rem（試算表的「待收尾款」），這裡不重算。
+  //    ERP 那邊是 splitMergedDeposits 算好寫進去的，照抄才不會兩邊不一致。
+  const byLink = []; let pending = 0;
+  os.forEach(o => {
+    if(!o.link){ pending += (Number(o.rem) || 0); return; }
+    let g = byLink.filter(x => x.link === o.link)[0];
+    if(!g){ g = { link:o.link, rem:0 }; byLink.push(g); }
+    g.rem += (Number(o.rem) || 0);
+  });
+
+  // 🔴 對帳單文字：金額全部用伺服器回來的值，這裡不重算。
+  //    ERP 那邊是用 splitMergedDeposits 算好寫進試算表的，照抄才不會兩邊不一致。
+  const items = [];
+  os.forEach(o => (o.items||[]).forEach(i => { if(i.status !== '斷貨') items.push(i); }));
+  const receipt =
+'您好\n以下為您本期結算的訂單內容及結帳金額（共 ' + os.length + ' 筆訂單）\n\n'
++ '訂購品項：\n'
++ items.map(i => '　' + i.name + (i.spec ? '（' + i.spec + '）' : '') + ' X' + i.qty).join('\n')
++ '\n\n訂單總額：' + nf(total) + '\n\n確認下單流程：\n1. 匯款商品訂金：' + nf(due) + '\n'
+// 🔴 等號右邊只能是「上面列出來的那幾個賣場」加起來，不能用整組的 rem ——
+//    還沒開賣場的那幾張是分開講的，混進來就會變成 $0 ＋ $20 ＝ $40 這種對不起來的算式。
+//    客人看到加不起來的數字，後面寫什麼都不會信。
++ (byLink.length > 1
+   ? '\n2. 取貨時付：' + byLink.map(g => nf(g.rem)).join(' ＋ ')
+     + ' ＝ ' + nf(byLink.reduce((s,g) => s + g.rem, 0))
+     + '\n這次分 ' + byLink.length + ' 個包裹寄出，各自取貨時付一筆 🚚\n\n'
+     + byLink.map((g,i) => '📮 第 ' + (i+1) + ' 批｜取貨時付 ' + nf(g.rem) + '\n' + g.link).join('\n\n')
+     + (pending > 0 ? '\n\n📦 另外還有 ' + nf(pending) + ' 的商品還在備貨，到齊後會再把連結給您' : '')
+   : byLink.length === 1
+     ? '\n2. 尾款 ' + nf(byLink[0].rem) + ' 將於取貨時以貨到付款支付\n賣貨便下單連結：\n' + byLink[0].link
+       + (pending > 0 ? '\n\n📦 另外還有 ' + nf(pending) + ' 的商品還在備貨，到齊後會再把連結給您' : '')
+     : '\n2. 尾款 ' + nf(rem) + ' 將於取貨時以貨到付款支付\n（賣場還沒開，開好會把連結給您）')
++ '\n\n再麻煩您幫我們完成下單流程，會再更新貨況給您，感謝支持☺️';
+
+  return '<button class="btn ghost" id="back" style="margin-bottom:10px">← 回客人清單</button>'
+    + '<div class="sum">' + esc(DETAIL.name) + '　' + os.length + ' 張單<br>'
+    + '總額 ' + nf(total) + '・已收 ' + nf(paid) + '・應收訂金 ' + nf(due) + '・取貨時付 ' + nf(rem) + '</div>'
+    + os.map(o =>
+        '<div class="row"><div class="fx">'
+        + '<div><div class="n">' + esc(o.id) + '</div>'
+        + '<div class="m"><span>' + esc(o.createdAt) + '</span><span>' + nf(o.total) + '</span>'
+        + (o.track ? '<span>' + esc(o.track) + '</span>' : '') + '</div></div>'
+        + '<div class="qty">訂金 ' + nf(o.due) + '</div></div>'
+        + (o.items||[]).map(i =>
+            '<div class="fx" style="margin-top:5px;font-size:11px;align-items:baseline">'
+            + '<span style="flex:1' + (i.status==='斷貨'?';color:#ccc;text-decoration:line-through':'') + '">'
+            +   esc(i.name) + (i.spec ? '（' + esc(i.spec) + '）' : '') + (i.qty>1 ? ' ×' + i.qty : '') + '</span>'
+            + '<span class="chip ' + CHIP(i.status) + '">' + esc(i.status) + '</span></div>').join('')
+        + '</div>').join('')
+    + '<div class="sum" style="margin-top:12px">對帳單（可直接貼給客人）</div>'
+    + '<pre class="rc" id="rc">' + esc(receipt) + '</pre>'
+    + '<button class="btn" id="cp">📋 複製對帳單</button>';
+}
+
+function payView(){
+  const rows = (DATA.customers || []).filter(c => c.gap > 0);
+  const owe = rows.reduce((s,c)=>s+c.gap,0);
+  if(!rows.length) return '<div class="empty">✅ 沒有人欠訂金</div>';
+  return '<div class="sum">' + rows.length + ' 位未結清・訂金缺口合計 ' + nf(owe) + '</div>'
+    + rows.map(c =>
+        '<div class="row tap" data-c="' + esc(c.key) + '"><div class="fx">'
+        + '<div><div class="n">' + esc(c.name) + '</div>'
+        + '<div class="m"><span>' + c.orders + ' 張單</span><span>應收 ' + nf(c.due) + '</span>'
+        + '<span>已收 ' + nf(c.paid) + '</span></div></div>'
+        + '<div class="qty" style="color:#C8741A">還缺 ' + nf(c.gap) + '</div>'
+        + '</div></div>').join('');
+}
+
+function draw(){
+  drawTabs();
+  if(!DATA){ $('main').innerHTML = '<div class="spin"></div>'; return; }
+  $('asof').textContent = '更新於 ' + DATA.asOf;
+  $('main').innerHTML =
+      TAB === 'todo' ? listView(DATA.todo, '件')
+    : TAB === 'pack' ? listView(DATA.pack, '件')
+    : TAB === 'cust' ? (DETAIL ? custDetail() : custList())
+    :                  payView();
+
+  const q = $('q');
+  if(q) q.oninput = () => {
+    Q = q.value; const p = q.selectionStart; draw();
+    const n2 = $('q'); if(n2){ n2.focus(); try{ n2.setSelectionRange(p,p); }catch(e){} }
+  };
+  Array.from(document.querySelectorAll('[data-c]')).forEach(el =>
+    el.onclick = () => openCustomer(el.dataset.c));
+  if($('back')) $('back').onclick = () => { DETAIL = null; draw(); };
+  if($('cp')) $('cp').onclick = () => {
+    const t = $('rc').textContent;
+    (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject())
+      .then(()=>{ $('cp').textContent = '✅ 已複製'; setTimeout(()=>{ $('cp').textContent='📋 複製對帳單'; },1800); })
+      .catch(()=>{ $('cp').textContent = '複製失敗 —— 長按上面的文字手動選取'; });
+  };
+}
+
+async function openCustomer(key){
+  const c = (DATA.customers||[]).filter(x => x.key === key)[0];
+  TAB = 'cust'; Q = '';
+  $('main').innerHTML = '<div class="spin"></div>';
+  try{
+    const r = await callGAS('getStaffCustomer', { key: key });
+    DETAIL = { name: c ? c.name : key, orders: r.orders || [] };
+    draw();
+  }catch(e){ showErr(e); }
+}
+
+function showErr(e){
+  const msg = (e && e.message) || String(e);
+  $('main').innerHTML = '<div class="err">'
+    + '<p style="margin:0 0 8px"><b>⚠️ ' + esc(msg) + '</b></p>'
+    + '<p style="margin:0 0 10px;font-size:11.5px">[' + esc(STAGE) + ']</p>'
+    + (/只有 CJ 小幫手|STAFF_LINE_IDS/.test(msg)
+        ? '<p style="margin:0 0 10px;font-size:11.5px">在 GAS 跑 <b>RUN_檢查白名單</b> 看看 '
+          + 'STAFF_LINE_IDS 是不是完整的 33 個字。</p>' : '')
+    + (/dispatch/.test(msg)
+        ? '<p style="margin:0 0 10px;font-size:11.5px">code.gs 要加這兩行：<br>'
+          + '<code style="font-size:10.5px">getStaffAll</code> 和 '
+          + '<code style="font-size:10.5px">getStaffCustomer</code> 的 dispatch</p>' : '')
+    + '<button class="btn ghost" onclick="location.reload()">重新整理</button>'
+    + '</div>';
+}
+
+/* ── 啟動 ─────────────────────────────────────── */
+(async function start(){
+  try{
+    if(!LIFF_ID || LIFF_ID.indexOf('PASTE') === 0){
+      throw new Error('還沒設定小幫手頁的 LIFF_ID（檔案第 ~95 行）');
+    }
+    STAGE = 'liff.init';
+    await liff.init({ liffId: LIFF_ID });
+    if(!liff.isLoggedIn()){ liff.login(); return; }
+
+    STAGE = 'liff.getIDToken';
+    TOKEN = liff.getIDToken() || '';
+    // 🔴 拿不到 token 幾乎都是 LIFF 沒勾 openid scope。講清楚，不要只說「驗證失敗」。
+    if(!TOKEN) throw new Error('拿不到 ID Token —— LIFF 的 Scopes 要勾 openid（LINE Developers 裡改）');
+
+    DATA = await callGAS('getStaffAll', {});
+    draw();
+  }catch(e){ showErr(e); }
+})();
+</script>
+</body>
+</html>
