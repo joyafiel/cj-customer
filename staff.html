@@ -334,6 +334,23 @@ async function openCustomer(key){
 
 function showErr(e){
   const msg = (e && e.message) || String(e);
+
+  // 🔴 伺服器說過期 → 自己換一張，不要把這種訊息丟給使用者看。
+  //    （上面那段是「送出前」就擋掉；這裡是「伺服器那邊才判定過期」的補網。）
+  if(/expired/i.test(msg) && typeof liff !== 'undefined' && liff.login){
+    if(reloginGuard()){
+      $('main').innerHTML = '<div class="spin"></div>'
+        + '<p class="empty">身分證明過期了，重新登入一下…</p>';
+      liff.login({ redirectUri: location.href });
+      return;
+    }
+    $('main').innerHTML = '<div class="err">'
+      + '<p style="margin:0 0 8px"><b>⚠️ 身分一直驗不過</b></p>'
+      + '<p style="margin:0 0 10px;font-size:11.5px">換了新的身分證明還是說過期，'
+      + '最常見的原因是**手機時間不準**。請到設定把日期與時間改成「自動設定」，再開一次。</p>'
+      + '<button class="btn ghost" onclick="location.reload()">重新整理</button></div>';
+    return;
+  }
   $('main').innerHTML = '<div class="err">'
     + '<p style="margin:0 0 8px"><b>⚠️ ' + esc(msg) + '</b></p>'
     + '<p style="margin:0 0 10px;font-size:11.5px">[' + esc(STAGE) + ']</p>'
@@ -347,6 +364,43 @@ function showErr(e){
     + '<button class="btn ghost" onclick="location.reload()">重新整理</button>'
     + '</div>';
 }
+
+/* ── ID Token 的有效期限 ──────────────────────── */
+
+/**
+ * JWT 的中間那段是 base64url 編碼的 JSON，裡面有 exp（到期時間，秒）。
+ *
+ * 🔴 只用正規表示式撈 exp 這個數字，不做完整 JSON.parse ——
+ *    payload 裡有使用者名稱，可能含中文／emoji，atob 出來的位元組直接 JSON.parse
+ *    會因為編碼問題炸掉。我們只要一個數字，不需要為它處理 UTF-8。
+ */
+function jwtExp(t){
+  try{
+    const b = String(t).split('.')[1];
+    if(!b) return 0;
+    const raw = atob(b.replace(/-/g,'+').replace(/_/g,'/'));
+    const m = raw.match(/"exp"\s*:\s*(\d+)/);
+    return m ? Number(m[1]) : 0;
+  }catch(e){ return 0; }
+}
+// 剩不到 2 分鐘就當作過期 —— 免得送出的路上剛好跨過期限
+function tokenExpiringSoon(t){
+  const exp = jwtExp(t);
+  if(!exp) return false;                       // 讀不出來就別亂跳，交給伺服器判斷
+  return (exp * 1000 - Date.now()) < 120000;
+}
+
+/* 防迴圈：重新登入最多一次。liff.login() 會重載頁面，所以狀態要存在 sessionStorage。
+   （存不進去也不能讓整頁掛掉 —— 無痕模式、封鎖網站資料都會讓它丟例外） */
+const RG = 'cjStaffRelogin';
+function reloginGuard(){
+  try{
+    if(sessionStorage.getItem(RG)) return false;   // 已經換過一次了，不要再跳
+    sessionStorage.setItem(RG, '1');
+  }catch(e){}
+  return true;
+}
+function clearReloginGuard(){ try{ sessionStorage.removeItem(RG); }catch(e){} }
 
 /* ── 啟動 ─────────────────────────────────────── */
 (async function start(){
@@ -362,6 +416,25 @@ function showErr(e){
     TOKEN = liff.getIDToken() || '';
     // 🔴 拿不到 token 幾乎都是 LIFF 沒勾 openid scope。講清楚，不要只說「驗證失敗」。
     if(!TOKEN) throw new Error('拿不到 ID Token —— LIFF 的 Scopes 要勾 openid（LINE Developers 裡改）');
+
+    // 🔴 ID Token 會過期，而且 LIFF **不會自動換新的**。
+    //
+    //    過期的徵狀是伺服器回「IdToken expired」—— 看起來像設定壞了，
+    //    其實只是頁面開太久、或上次登入隔了一段時間。
+    //    與其讓你看到一串嚇人的錯誤訊息，不如在送出前先看一眼有效期限，
+    //    快過期就自己重新登入換一張。
+    //
+    //    ⚠️ liff.login() 會讓頁面重新載入，所以一定要有防迴圈 ——
+    //       萬一換完還是過期（例如裝置時間不對），就不要一直跳。
+    if(tokenExpiringSoon(TOKEN)){
+      if(!reloginGuard()){
+        throw new Error('身分一直驗不過，可能是手機時間不準。請確認時間設為自動，再開一次。');
+      }
+      STAGE = 'liff.login(換新的身分證明)';
+      liff.login({ redirectUri: location.href });
+      return;
+    }
+    clearReloginGuard();
 
     DATA = await callGAS('getStaffAll', {});
     draw();
