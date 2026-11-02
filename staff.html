@@ -60,6 +60,48 @@ pre.rc{ white-space:pre-wrap; word-break:break-all; font:inherit; font-size:11px
 .err{ background:#FBECEC; border:1px solid #ecd4d4; border-radius:14px; padding:16px;
       font-size:12.5px; line-height:1.9; color:#8a4a4a; }
 .err b{ color:#A8403F; }
+
+/* ── 記帳（資金往來）────────────────────────────── */
+.fbal{ background:var(--cream); border:1px solid var(--line); border-radius:14px;
+       padding:14px 13px; margin-bottom:4px; }
+.fbal .cap{ font-size:10px; letter-spacing:2px; color:var(--muted); font-weight:700; }
+.fbal .big{ font-size:30px; font-weight:800; line-height:1.25; letter-spacing:-.5px;
+            font-variant-numeric:tabular-nums; color:#A8403F; }
+.fbal .big.pos{ color:#2E8B45; }
+.fbal .say{ font-size:12px; font-weight:700; margin-top:1px; }
+.fbal .sub{ font-size:10.5px; color:var(--muted); margin-top:3px; }
+.flab{ font-size:11px; font-weight:800; color:var(--brand-dark); margin:13px 0 6px; letter-spacing:.5px; }
+.flab span{ font-weight:500; color:var(--muted); }
+.fchips{ display:flex; flex-wrap:wrap; gap:5px; }
+.fc{ border:1px solid var(--line); background:#fff; color:var(--ink); font:inherit;
+     font-size:11.5px; font-weight:700; padding:7px 10px; border-radius:999px; cursor:pointer; }
+.fc.on.in{ background:#E9F7EC; color:#2E8B45; border-color:#2E8B45; }
+.fc.on.out{ background:#FBECEC; color:#A8403F; border-color:#A8403F; }
+.fc.sm{ font-size:11px; padding:5px 9px; font-weight:600; }
+.fc.sm.on{ background:var(--brand); color:#fff; border-color:var(--brand); }
+.fin{ width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:12px;
+      font:inherit; font-size:14px; outline:none; background:#fff; color:var(--ink); }
+.fin:focus{ border-color:var(--brand); }
+.fmoney{ display:flex; align-items:center; gap:8px; }
+.fmoney .fsym{ font-size:21px; font-weight:800; color:var(--muted); width:18px; text-align:center; }
+.fmoney .fin{ flex:1; min-width:0; font-size:24px; font-weight:800; text-align:right;
+              font-variant-numeric:tabular-nums; }
+.frow2{ display:flex; gap:7px; }
+.frow2 .fin{ flex:1; min-width:0; font-size:13px; }
+.fprev{ border:1px dashed var(--line); border-radius:12px; padding:10px 11px; margin:13px 0 10px; }
+.fprev .cap{ font-size:9.5px; letter-spacing:1.5px; color:var(--muted); font-weight:700; margin-bottom:5px; }
+.fprev .ln{ display:flex; justify-content:space-between; gap:9px; align-items:baseline;
+            font-size:12.5px; font-weight:700; }
+.fprev .am{ font-variant-numeric:tabular-nums; white-space:nowrap; }
+.fprev .am.in{ color:#2E8B45; } .fprev .am.out{ color:#A8403F; }
+.fprev .mm{ font-size:10.5px; color:var(--muted); margin-top:3px; word-break:break-all; }
+.fok{ background:#E9F7EC; border:1px solid #bfe3c8; color:#2E8B45; border-radius:12px;
+      padding:9px 11px; font-size:11.5px; font-weight:700; margin-top:9px; line-height:1.7; }
+.fitem{ border-top:1px solid var(--line); padding:9px 2px; }
+.fitem .fa{ font-variant-numeric:tabular-nums; font-size:13px; font-weight:800; white-space:nowrap; }
+.fitem .fa.in{ color:#2E8B45; } .fitem .fa.out{ color:#A8403F; }
+.ftag{ font-size:9px; font-weight:800; padding:1px 5px; border-radius:5px;
+       background:var(--cream); color:var(--muted); margin-right:5px; }
 </style>
 </head>
 <body>
@@ -85,7 +127,9 @@ pre.rc{ white-space:pre-wrap; word-break:break-all; font:inherit; font-size:11px
    不要在這裡自己算任何數字。
    ============================================================ */
 
-/* 🔴 要自己填：給「小幫手頁」用的 LIFF ID（跟客人查單頁**不同**一支）
+/* ✅ 已填好（2026/11/03）：給「小幫手頁」用的 LIFF ID（跟客人查單頁**不同**一支）
+      channel 2008786061 ＝ 小幫手的 LINE Login channel，
+      跟 cj_staff.gs 的 STAFF_CH_FALLBACK_ 是同一個，對得起來。
       LINE Developers → 你的 LINE Login channel → LIFF → Add
         Endpoint URL : 這一頁的網址（例如 https://cj-customer.vercel.app/staff.html）
         Size         : Full
@@ -103,6 +147,10 @@ const nf = (n) => '$' + Number(n || 0).toLocaleString();
 let TOKEN = '';          // LIFF ID Token
 let DATA = null;         // getStaffAll 的結果
 let TAB = 'todo', Q = '', PICKED = null, DETAIL = null, ONLY_GHOST = false;
+
+/* 記帳分頁。FUND 是伺服器回來的 { total, count, rows, cats, sheetName }。
+   🔴 類別清單**不在這裡寫第二份** —— 跟 cj_資金往來.gs 拿，全系統只有一個定義。 */
+let FUND = null, FUND_ERR = '', FUND_CAT = '', FUND_MSG = '', FUND_FAIL = '', FUND_BUSY = false;
 let STAGE = 'boot';
 
 /* ── 呼叫 GAS ─────────────────────────────────── */
@@ -142,7 +190,8 @@ const TABS = () => [
   { k:'todo', t:'待叫件', n: DATA ? DATA.todo.length : '' },
   { k:'pack', t:'可包貨', n: DATA ? DATA.pack.length : '' },
   { k:'cust', t:'查單',   n: '' },
-  { k:'pay',  t:'待收款', n: DATA ? DATA.customers.filter(c => c.gap > 0).length : '' }
+  { k:'pay',  t:'待收款', n: DATA ? DATA.customers.filter(c => c.gap > 0).length : '' },
+  { k:'fund', t:'記帳',   n: '' }
 ];
 
 function drawTabs(){
@@ -150,7 +199,13 @@ function drawTabs(){
     '<button class="tab' + (TAB===t.k?' on':'') + '" data-k="' + t.k + '">'
     + '<b>' + (t.n === '' ? '·' : t.n) + '</b>' + t.t + '</button>').join('');
   Array.from(document.querySelectorAll('.tab')).forEach(b =>
-    b.onclick = () => { TAB = b.dataset.k; Q=''; PICKED=null; DETAIL=null; ONLY_GHOST=false; draw(); });
+    b.onclick = () => {
+      TAB = b.dataset.k; Q=''; PICKED=null; DETAIL=null; ONLY_GHOST=false; FUND_MSG='';
+      draw();
+      // 記帳的資料是另一張試算表，而且不是每個小幫手都能看 ——
+      // 所以開機不抓，點進去才抓。
+      if(TAB === 'fund' && !FUND && !FUND_ERR) loadFund();
+    });
 }
 
 function listView(arr, unit){
@@ -294,6 +349,219 @@ function payView(){
         + '</div></div>').join('');
 }
 
+/* ── 記帳（資金往來）──────────────────────────────
+   設計重點：
+   ① 符號由類別決定，人只輸入正數 —— 打錯正負號這件事直接消失。
+   ② 類別清單從伺服器來（FUND.cats），這一頁不自己寫一份。
+   ③ 送出前有一行預覽，長得跟會寫進試算表的那一列一模一樣。
+   🔴 ④ 改輸入時**只更新預覽那幾個節點**，不重畫整頁 ——
+         重畫會讓手機鍵盤收起來、游標跳掉。
+   ================================================= */
+
+async function loadFund(){
+  FUND_ERR = '';
+  try{
+    FUND = await callGAS('getFundList', {});
+    if(FUND && FUND.cats && FUND.cats.length && !FUND_CAT){
+      // 預設停在最常用的那個（她絕大多數是付貨款出去）
+      const def = FUND.cats.filter(c => c.k === '貨款支出')[0] || FUND.cats[0];
+      FUND_CAT = def.k;
+    }
+  }catch(e){
+    FUND = null;
+    FUND_ERR = (e && e.message) || String(e);
+  }
+  draw();
+}
+
+function fundCat(){
+  if(!FUND || !FUND.cats) return null;
+  return FUND.cats.filter(c => c.k === FUND_CAT)[0] || null;
+}
+
+/* 常用對象：類別自己帶的，加上最近明細裡真的出現過的（照她的實際資料長出來，
+   不是我寫死一份名單，所以她換廠商不用改程式）。*/
+function fundParties(C){
+  const seen = {}, out = [];
+  (C.parties || []).forEach(p => { if(p && !seen[p]){ seen[p] = 1; out.push(p); } });
+  const wantIn = C.dir > 0;
+  (FUND.rows || []).forEach(r => {
+    if(wantIn ? !(r.a > 0) : !(r.a < 0)) return;
+    const name = wantIn ? r.b : r.c;
+    if(!name || name === 'Joya' || seen[name]) return;
+    seen[name] = 1; out.push(name);
+  });
+  return out.slice(0, 14);
+}
+
+function fundMemo(){
+  const C = fundCat();
+  let m = ($('fMemo') ? $('fMemo').value : '').trim();
+  if(C && C.period && $('fFrom') && $('fTo')){
+    const f = $('fFrom').value, t = $('fTo').value;
+    if(f && t){
+      const sh = s => { const p = s.split('-'); return (+p[1]) + '/' + (+p[2]); };
+      const tag = sh(f) + '-' + sh(t);
+      m = m ? (tag + ' ' + m) : (tag + ' ' + C.k);
+    }
+  }
+  return m;
+}
+
+function fundPreview(){
+  const C = fundCat();
+  if(!C || !$('fPvAmt')) return;
+  const party = $('fParty').value.trim();
+  const raw = Math.abs(Math.round(Number($('fAmt').value) || 0));
+  const isIn = C.dir > 0;
+
+  $('fPvWho').textContent = isIn ? ((party || '？') + ' → Joya') : ('Joya → ' + (party || '？'));
+  $('fPvAmt').textContent = raw ? ((isIn ? '' : '-') + raw.toLocaleString()) : '—';
+  $('fPvAmt').className = 'am ' + (isIn ? 'in' : 'out');
+  $('fPvMemo').textContent = fundMemo();
+
+  Array.from(document.querySelectorAll('[data-fp]')).forEach(b =>
+    b.className = 'fc sm' + (b.dataset.fp === party ? ' on' : ''));
+
+  $('fGo').disabled = FUND_BUSY || !party || !raw;
+  $('fGo').textContent = FUND_BUSY ? '送出中…' : '送出';
+}
+
+function fundView(){
+  if(FUND_ERR){
+    return '<div class="warn"><b>記帳打不開</b><br>' + esc(FUND_ERR).replace(/\n/g,'<br>') + '</div>'
+         + '<button class="btn ghost" id="fRetry">再試一次</button>';
+  }
+  if(!FUND) return '<div class="spin"></div>';
+
+  const C = fundCat();
+  const t = Number(FUND.total) || 0;
+  const neg = t < 0;
+
+  let h = '';
+  if(FUND_FAIL){
+    h += '<div class="warn"><b>沒有記進去</b><br>' + esc(FUND_FAIL).replace(/\n/g,'<br>')
+       + '<br><br>試算表沒有被改到，直接再送一次就好。</div>';
+  }
+
+  h += '<div class="fbal">'
+    + '<div class="cap">目前款項</div>'
+    + '<div class="big' + (neg ? '' : ' pos') + '">' + (neg ? '-' : '') + Math.abs(t).toLocaleString() + '</div>'
+    + '<div class="say">' + (neg ? ('克勞要補給我 ' + nf(-t)) : ('我手上還有克勞的 ' + nf(t))) + '</div>'
+    + '<div class="sub">' + FUND.count + ' 筆往來 · ' + esc(FUND.sheetName || '') + ' · ' + esc(FUND.asOf || '') + '</div>'
+    + '</div>';
+
+  h += '<div class="flab">類別 <span>正負號由類別決定，你只填正數</span></div><div class="fchips">'
+     + FUND.cats.map(c =>
+         '<button class="fc ' + (c.dir > 0 ? 'in' : 'out') + (c.k === FUND_CAT ? ' on' : '')
+         + '" data-fk="' + esc(c.k) + '">' + (c.dir > 0 ? '＋' : '−') + esc(c.k) + '</button>').join('')
+     + '</div>';
+
+  if(C){
+    h += '<div class="flab">' + (C.dir > 0 ? '誰給的' : '付給誰')
+       + (C.hint ? ' <span>' + esc(C.hint) + '</span>' : '') + '</div>';
+    const ps = fundParties(C);
+    if(ps.length){
+      h += '<div class="fchips" style="margin-bottom:7px">'
+         + ps.map(p => '<button class="fc sm" data-fp="' + esc(p) + '">' + esc(p) + '</button>').join('')
+         + '</div>';
+    }
+    h += '<input class="fin" id="fParty" type="text" autocomplete="off" placeholder="或直接打名字"'
+       + ' value="' + esc(C.period && C.parties && C.parties[0] ? C.parties[0] : '') + '">';
+
+    h += '<div class="flab">金額</div>'
+       + '<div class="fmoney"><span class="fsym" id="fSym">' + (C.dir > 0 ? '＋' : '−') + '</span>'
+       + '<input class="fin" id="fAmt" type="number" inputmode="numeric" min="0" step="1" placeholder="0"></div>';
+
+    if(C.period){
+      h += '<div class="flab">期間 <span>會自動寫進備註</span></div>'
+         + '<div class="frow2"><input class="fin" id="fFrom" type="date" aria-label="期間起">'
+         + '<input class="fin" id="fTo" type="date" aria-label="期間迄"></div>';
+    }
+
+    const now = new Date();
+    const pad = n => (n < 10 ? '0' : '') + n;
+    const today = now.getFullYear() + '-' + pad(now.getMonth()+1) + '-' + pad(now.getDate());
+
+    h += '<div class="flab">備註</div>'
+       + '<input class="fin" id="fMemo" type="text" autocomplete="off" placeholder="買了什麼、給誰的">'
+       + '<div class="flab">日期</div>'
+       + '<input class="fin" id="fDate" type="date" value="' + today + '">';
+
+    h += '<div class="fprev"><div class="cap">會寫進試算表的這一列</div>'
+       + '<div class="ln"><span id="fPvWho">—</span><span class="am" id="fPvAmt">—</span></div>'
+       + '<div class="mm" id="fPvMemo"></div></div>'
+       + '<button class="btn" id="fGo" disabled>送出</button>';
+
+    if(FUND_MSG) h += '<div class="fok">' + esc(FUND_MSG) + '</div>';
+  }
+
+  h += '<div class="flab" style="margin-top:18px">最近的往來</div>';
+  h += (FUND.rows || []).slice(0, 25).map(r => {
+    const isIn = r.a > 0;
+    return '<div class="fitem"><div class="fx">'
+      + '<div style="min-width:0"><div class="n">' + esc(r.b) + ' → ' + esc(r.c) + '</div>'
+      + (r.m ? '<div class="m"><span>' + esc(r.m) + '</span></div>' : '') + '</div>'
+      + '<div style="text-align:right"><div class="fa ' + (isIn ? 'in' : 'out') + '">'
+      + (isIn ? '+' : '-') + Math.abs(r.a).toLocaleString() + '</div>'
+      + '<div class="m" style="justify-content:flex-end">' + esc(r.d) + '</div></div>'
+      + '</div></div>';
+  }).join('') || '<div class="empty">還沒有紀錄</div>';
+
+  return h;
+}
+
+async function fundSubmit(){
+  const C = fundCat();
+  if(!C || FUND_BUSY) return;
+  const party = $('fParty').value.trim();
+  const raw = Math.abs(Math.round(Number($('fAmt').value) || 0));
+  if(!party || !raw) return;
+
+  FUND_BUSY = true; FUND_MSG = ''; FUND_FAIL = '';
+  fundPreview();
+  try{
+    const r = await callGAS('addFundEntry', {
+      cat: C.k, party: party, amount: raw,
+      memo: fundMemo(), date: $('fDate').value
+    });
+    FUND.total = r.total != null ? r.total : FUND.total;
+    if(r.dup){
+      FUND_MSG = '這一筆剛剛已經記過了，沒有重複寫。';
+    }else{
+      if(r.row){ FUND.rows.unshift(r.row); FUND.count = (FUND.count || 0) + 1; }
+      FUND_MSG = '✓ 已記一筆　' + (C.dir > 0 ? '＋' : '−') + raw.toLocaleString() + '　' + C.k
+               + '\n已經寫進試算表了。';
+    }
+  }catch(e){
+    // 🔴 失敗要存進狀態讓 fundView 畫出來，不能直接塞進 DOM ——
+    //    後面那個 draw() 會把塞進去的東西整個洗掉，變成「失敗了畫面卻什麼都不說」。
+    FUND_MSG = '';
+    FUND_FAIL = (e && e.message) || String(e);
+  }
+  FUND_BUSY = false;
+  draw();
+}
+
+function wireFund(){
+  if($('fRetry')) $('fRetry').onclick = () => { FUND_ERR = ''; FUND = null; draw(); loadFund(); };
+
+  Array.from(document.querySelectorAll('[data-fk]')).forEach(b =>
+    b.onclick = () => { FUND_CAT = b.dataset.fk; FUND_MSG = ''; draw(); });
+
+  if(!$('fParty')) return;
+
+  Array.from(document.querySelectorAll('[data-fp]')).forEach(b =>
+    b.onclick = () => { $('fParty').value = b.dataset.fp; fundPreview(); });
+
+  // 🔴 只更新預覽，不重畫 —— 重畫會把鍵盤收起來
+  ['fParty','fAmt','fMemo','fFrom','fTo'].forEach(id => {
+    if($(id)) $(id).oninput = fundPreview;
+  });
+  $('fGo').onclick = fundSubmit;
+  fundPreview();
+}
+
 function draw(){
   drawTabs();
   if(!DATA){ $('main').innerHTML = '<div class="spin"></div>'; return; }
@@ -302,7 +570,10 @@ function draw(){
       TAB === 'todo' ? listView(DATA.todo, '件')
     : TAB === 'pack' ? listView(DATA.pack, '件')
     : TAB === 'cust' ? (DETAIL ? custDetail() : custList())
+    : TAB === 'fund' ? fundView()
     :                  payView();
+
+  if(TAB === 'fund') wireFund();
 
   const q = $('q');
   if(q) q.oninput = () => {
