@@ -612,6 +612,7 @@ function showErr(e){
     if(reloginGuard()){
       $('main').innerHTML = '<div class="spin"></div>'
         + '<p class="empty">身分證明過期了，重新登入一下…</p>';
+      try{ liff.logout(); }catch(e){}     // 🔴 少了這行，login 會把舊的 token 再給一次
       liff.login({ redirectUri: location.href });
       return;
     }
@@ -619,7 +620,8 @@ function showErr(e){
       + '<p style="margin:0 0 8px"><b>⚠️ 身分一直驗不過</b></p>'
       + '<p style="margin:0 0 10px;font-size:11.5px">換了新的身分證明還是說過期，'
       + '最常見的原因是**手機時間不準**。請到設定把日期與時間改成「自動設定」，再開一次。</p>'
-      + '<button class="btn ghost" onclick="location.reload()">重新整理</button></div>';
+      + '<button class="btn" onclick="cjRelogin()">重新登入</button>'
+      + '<button class="btn ghost" style="margin-top:8px" onclick="cjHardReload()">重新整理</button></div>';
     return;
   }
   $('main').innerHTML = '<div class="err">'
@@ -632,7 +634,11 @@ function showErr(e){
         ? '<p style="margin:0 0 10px;font-size:11.5px">code.gs 要加這兩行：<br>'
           + '<code style="font-size:10.5px">getStaffAll</code> 和 '
           + '<code style="font-size:10.5px">getStaffCustomer</code> 的 dispatch</p>' : '')
-    + '<button class="btn ghost" onclick="location.reload()">重新整理</button>'
+    // 🔴 身分相關的錯誤要給「重新登入」，因為單純重新整理換不到新的 token。
+    + (/身分證明|IdToken|token|登入|expired/i.test(msg)
+        ? '<button class="btn" onclick="cjRelogin()">重新登入</button>'
+          + '<button class="btn ghost" style="margin-top:8px" onclick="cjHardReload()">重新整理</button>'
+        : '<button class="btn ghost" onclick="cjHardReload()">重新整理</button>')
     + '</div>';
 }
 
@@ -673,6 +679,20 @@ function reloginGuard(){
 }
 function clearReloginGuard(){ try{ sessionStorage.removeItem(RG); }catch(e){} }
 
+/* 🔴 2026/11/03：錯誤畫面上的「重新整理」一定要走這支，不能直接 location.reload()。
+      防迴圈的旗標存在 sessionStorage，重新整理不會清掉它 ——
+      所以舊版按幾次都是同一個錯誤畫面，等於按鈕是壞的。 */
+function cjHardReload(){ clearReloginGuard(); location.reload(); }
+
+/* 真正換一張新的身分證明。
+   🔴 關鍵是 logout —— **使用者已經登入時，單獨呼叫 liff.login() 會把原來那張
+      過期的 token 再給你一次**，換了等於沒換。先登出才會重新簽一張。 */
+function cjRelogin(){
+  clearReloginGuard();
+  try{ liff.logout(); }catch(e){}
+  liff.login({ redirectUri: location.href });
+}
+
 /* ── 啟動 ─────────────────────────────────────── */
 (async function start(){
   try{
@@ -699,9 +719,17 @@ function clearReloginGuard(){ try{ sessionStorage.removeItem(RG); }catch(e){} }
     //       萬一換完還是過期（例如裝置時間不對），就不要一直跳。
     if(tokenExpiringSoon(TOKEN)){
       if(!reloginGuard()){
-        throw new Error('身分一直驗不過，可能是手機時間不準。請確認時間設為自動，再開一次。');
+        // 🔴 2026/11/03：舊版這裡怪「手機時間不準」，那幾乎都是冤枉的。
+        //    真正的原因是舊版只呼叫 liff.login() —— 使用者已經登入時，
+        //    它會把原來那張過期的 token 原封不動再給你一次，換了等於沒換，
+        //    第二輪就撞上防迴圈，然後卡死（重新整理也清不掉 sessionStorage 的旗標）。
+        //    現在換成 logout + login，這裡只剩真的換不到的情況。
+        throw new Error('重新登入過一次，還是拿不到新的身分證明。\n'
+                      + '按下面的「重新登入」再試一次；還是一樣的話，'
+                      + '檢查手機的日期與時間是不是設為「自動」。');
       }
-      STAGE = 'liff.login(換新的身分證明)';
+      STAGE = 'liff.logout + login（換新的身分證明）';
+      try{ liff.logout(); }catch(e){}                 // 🔴 這一行是關鍵，少了它換不到新的
       liff.login({ redirectUri: location.href });
       return;
     }
